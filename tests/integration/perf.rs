@@ -109,7 +109,7 @@ fn perf_fixtures_are_well_formed() {
 #[test]
 #[ignore]
 fn wide_sibling_list_with_structural_rules() {
-    let css = "li:nth-child(odd) { margin-left: 1px } li + li { color: red }";
+    let css = "li:nth-child(odd) { margin-left: 1px } li + li { color: red } li:nth-of-type(3n) { margin-top: 1px } li ~ li { padding-top: 1px }";
     let mut timings = Vec::new();
     for n in [2_000usize, 8_000] {
         let mut t = TestTree::new(NodeKind::Element);

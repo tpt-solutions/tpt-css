@@ -1337,3 +1337,42 @@ fn border_radius_expands_to_the_four_corners_in_clockwise_order() {
         longhands_of("child { }", &corners)
     );
 }
+
+#[test]
+fn nth_of_type_counts_only_siblings_of_the_same_name() {
+    let mut t = TestTree::new(NodeKind::Element);
+    let root = t.root();
+    t.nodes[0].name.local = "html".into();
+    let a = t.element(root, "div");
+    let b = t.element(root, "span");
+    let c = t.element(root, "div");
+    let d = t.element(root, "span");
+    let e = t.element(root, "div");
+    let css = "div:nth-of-type(2) { margin-left: 1px } \
+               span:nth-last-of-type(1) { margin-top: 2px } \
+               div:nth-last-of-type(1) { margin-right: 3px } \
+               b ~ span { color: red }";
+    let map = style_with(css, &t);
+    assert!(!px_near(
+        style_of(&map, a).raw(lookup("margin-left").unwrap()),
+        1.0
+    ));
+    assert!(px_near(
+        style_of(&map, c).raw(lookup("margin-left").unwrap()),
+        1.0
+    ));
+    assert!(!px_near(
+        style_of(&map, e).raw(lookup("margin-left").unwrap()),
+        1.0
+    ));
+    assert!(px_near(
+        style_of(&map, d).raw(lookup("margin-top").unwrap()),
+        2.0
+    ));
+    assert!(px_near(
+        style_of(&map, e).raw(lookup("margin-right").unwrap()),
+        3.0
+    ));
+    // `b ~ span` needs an earlier `b` sibling, and there is none.
+    assert_eq!(style_of(&map, b).color(), Color::BLACK);
+}

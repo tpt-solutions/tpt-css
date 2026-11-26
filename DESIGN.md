@@ -401,7 +401,7 @@ engineering measurements, not claims about other machines (spec 21.1).
     cache holds each parent's element children and their positions for one style
     pass, and it is cleared at the start of `resolve`, `restyle`, and `inspect`.
     `:nth-child()` and `+` read a position in O(log n). `~`, `:nth-of-type()`, and
-    `:nth-child(of S)` still walk the sibling list. Measured: a list of 8,000
+    `:nth-child(of S)` still tests each sibling. Measured: a list of 8,000
     siblings with structural rules now resolves in about 50 ms, against 389 ms
     before; the growth ratio for four times the siblings is 4.2, where quadratic
     would be about 16.
@@ -463,8 +463,8 @@ engineering measurements, not claims about other machines (spec 21.1).
   deterministic, which is not the same thing.
 - The WPT subsuites, which need a separate checkout (spec 22.2).
 - Calc depth: the configured `max_calc_depth` is the effective limit (decision 13). The value parser recurses up to 256, the default component nesting limit.
-- Sibling counting for `~`, `:nth-of-type()`, and `:nth-child(of S)` still walks the
-  sibling list (decision 25).
+- `:nth-child(of S)` still tests each sibling, because its predicate depends on the
+  matcher (decision 25).
 - Long-tail properties still missing: multi-value grammars (`transition`, `flex`,
   `grid`, `border-radius`, `box-shadow`), and angle, time, and resolution values.
 - Full resolve grew by roughly 35 to 60 percent in the runs here when the registry went from 50 to 80

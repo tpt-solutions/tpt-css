@@ -69,7 +69,7 @@ All decisions are recorded in DESIGN.md section 2.
 - [x] `parse/selectors.rs`: Tier 0 selectors: `*`, type, `#id`, `.class`, `[attr]`, `[attr=value]`, descendant, child, `:root`
 - [x] State selectors `:hover`, `:active`, `:focus` (adapter-provided state)
 - [x] `selectors/specificity.rs`: explicit `Specificity { a, b, c }` computed at parse time (spec 12.3)
-- [x] `selectors/matching.rs` and the candidate index: right-to-left matching, filtering of selectors by subject id, class, and type (`src/style/rule_index.rs`), and a per-pass sibling index for `:nth-child()` and `+` (`SiblingCache`). `~`, `:nth-of-type()`, and `:nth-child(... of S)` still walk the sibling list. Measured: an 8,000-sibling list with structural rules resolves in linear time (`tests/integration/perf.rs`).
+- [x] `selectors/matching.rs` and the candidate index: right-to-left matching, filtering of selectors by subject id, class, and type (`src/style/rule_index.rs`), and a per-pass sibling index for `:nth-child()` and `+` (`SiblingCache`). `~` and `:nth-of-type()` use the sibling index too. `:nth-child(... of S)` still tests each sibling. Measured: an 8,000-sibling list with structural rules resolves in linear time (`tests/integration/perf.rs`).
 - [x] Selector complexity bound (spec 19.2)
 
 ### Cascade (spec 13)

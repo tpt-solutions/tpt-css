@@ -82,10 +82,14 @@ pub struct Matcher<'a, T: StyleTree> {
     shadow: Option<NodeId>,
 }
 
-/// The element children of one parent, with the position of each.
+/// The element children of one parent, with the position of each, and each
+/// element's place among the siblings that share its element type.
 struct Siblings {
     elements: Vec<NodeId>,
     positions: BTreeMap<NodeId, usize>,
+    /// `(index, count)` among same-named siblings, both 1-based and counted from the
+    /// start, for `:nth-of-type()`.
+    of_type: BTreeMap<NodeId, (usize, usize)>,
 }
 
 impl Siblings {
@@ -96,10 +100,36 @@ impl Siblings {
             .copied()
             .filter(|c| tree.kind(*c) == NodeKind::Element)
             .collect();
+        Siblings::from_elements(tree, elements)
+    }
+
+    /// The sibling list of a parentless node: the node is its own only sibling.
+    fn single(node: NodeId) -> Siblings {
+        Siblings {
+            elements: vec![node],
+            positions: BTreeMap::from([(node, 0)]),
+            of_type: BTreeMap::from([(node, (1, 1))]),
+        }
+    }
+
+    fn from_elements<T: StyleTree>(tree: &T, elements: Vec<NodeId>) -> Siblings {
         let positions = elements.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+        let mut counts: BTreeMap<&String, usize> = BTreeMap::new();
+        for element in &elements {
+            *counts.entry(&tree.name(*element).local).or_insert(0) += 1;
+        }
+        let mut seen: BTreeMap<&String, usize> = BTreeMap::new();
+        let mut of_type = BTreeMap::new();
+        for element in &elements {
+            let name = &tree.name(*element).local;
+            let index = seen.entry(name).or_insert(0);
+            *index += 1;
+            of_type.insert(*element, (*index, counts[name]));
+        }
         Siblings {
             elements,
             positions,
+            of_type,
         }
     }
 }
@@ -303,7 +333,10 @@ impl<'a, T: StyleTree> Matcher<'a, T> {
                 None => false,
             },
             Combinator::SubsequentSibling => {
-                for prev in self.previous_element_siblings(node) {
+                let Some((sibs, pos)) = self.sibling_info(node) else {
+                    return false;
+                };
+                for prev in sibs.elements[..pos].iter().rev().copied() {
                     if !self.charge() {
                         return false;
                     }
@@ -331,45 +364,39 @@ impl<'a, T: StyleTree> Matcher<'a, T> {
                 false
             }
             Combinator::NextSibling => self.previous_element(node) == Some(anchor.node),
-            Combinator::SubsequentSibling => {
-                self.previous_element_siblings(node).contains(&anchor.node)
-            }
+            Combinator::SubsequentSibling => self
+                .sibling_info(node)
+                .is_some_and(|(sibs, pos)| sibs.elements[..pos].contains(&anchor.node)),
         }
     }
 
-    /// Runs `f` on the element siblings of `node` (itself included) and on the
-    /// index of `node` among them. A parentless node is its own only sibling.
-    /// Returns `None` if `node` is not an element child of its parent.
-    fn with_siblings<R>(&self, node: NodeId, f: impl FnOnce(&[NodeId], usize) -> R) -> Option<R> {
+    /// The element siblings of `node` (itself included), and the index of `node`
+    /// among them. A parentless node is its own only sibling. Returns `None` if
+    /// `node` is not an element child of its parent.
+    fn sibling_info(&self, node: NodeId) -> Option<(Rc<Siblings>, usize)> {
         let Some(parent) = self.tree.parent(node) else {
-            return Some(f(&[node], 0));
+            return Some((Rc::new(Siblings::single(node)), 0));
         };
         let siblings = match self.siblings {
             Some(cache) => cache.get(self.tree, parent),
             None => Rc::new(Siblings::of(self.tree, parent)),
         };
         let pos = *siblings.positions.get(&node)?;
-        Some(f(&siblings.elements, pos))
+        Some((siblings, pos))
     }
 
     /// The element sibling just before `node`, if any.
     fn previous_element(&self, node: NodeId) -> Option<NodeId> {
-        self.with_siblings(node, |list, pos| pos.checked_sub(1).map(|p| list[p]))
-            .flatten()
-    }
-
-    /// Element siblings before `node`, nearest first.
-    fn previous_element_siblings(&self, node: NodeId) -> Vec<NodeId> {
-        self.with_siblings(node, |list, pos| {
-            list[..pos].iter().rev().copied().collect()
-        })
-        .unwrap_or_default()
+        let (sibs, pos) = self.sibling_info(node)?;
+        pos.checked_sub(1).map(|p| sibs.elements[p])
     }
 
     /// Element siblings after `node`, nearest first.
     fn following_element_siblings(&self, node: NodeId) -> Vec<NodeId> {
-        self.with_siblings(node, |list, pos| list[pos + 1..].to_vec())
-            .unwrap_or_default()
+        match self.sibling_info(node) {
+            Some((sibs, pos)) => sibs.elements[pos + 1..].to_vec(),
+            None => Vec::new(),
+        }
     }
 
     fn compound_matches(&mut self, node: NodeId, compound: &CompoundSelector) -> bool {
@@ -513,48 +540,48 @@ impl<'a, T: StyleTree> Matcher<'a, T> {
                 return false;
             }
         }
-        // The plain forms need only the position, so they use the index directly.
-        if nth.of.is_none() && !nth.of_type {
-            let position =
-                self.with_siblings(
-                    node,
-                    |list, pos| {
-                        if nth.last {
-                            list.len() - pos
-                        } else {
-                            pos + 1
-                        }
-                    },
-                );
-            return match position {
-                Some(p) => anb_matches(p as i64, nth.a, nth.b),
-                None => false,
-            };
-        }
-        let mut sibs = match self.with_siblings(node, |list, _| list.to_vec()) {
-            Some(list) => list,
-            None => return false,
+        let Some((sibs, pos)) = self.sibling_info(node) else {
+            return false;
         };
-        if nth.of_type {
-            let name = self.tree.name(node).local.clone();
-            sibs.retain(|s| self.tree.name(*s).local == name);
-        }
-        if let Some(of) = &nth.of {
-            let mut filtered = Vec::with_capacity(sibs.len());
-            for s in sibs {
-                if self.list_matches(s, of) {
-                    filtered.push(s);
+        let position = match &nth.of {
+            None if nth.of_type => match sibs.of_type.get(&node) {
+                Some(&(index, count)) => {
+                    if nth.last {
+                        count + 1 - index
+                    } else {
+                        index
+                    }
+                }
+                None => return false,
+            },
+            None => {
+                if nth.last {
+                    sibs.elements.len() - pos
+                } else {
+                    pos + 1
                 }
             }
-            sibs = filtered;
-        }
-        if nth.last {
-            sibs.reverse();
-        }
-        match sibs.iter().position(|s| *s == node) {
-            Some(pos) => anb_matches((pos + 1) as i64, nth.a, nth.b),
-            None => false,
-        }
+            Some(of) => {
+                // The predicate depends on the matcher, so each sibling is tested.
+                let mut matching = Vec::with_capacity(sibs.elements.len());
+                for &sibling in sibs.elements.iter() {
+                    if self.list_matches(sibling, of) {
+                        matching.push(sibling);
+                    }
+                }
+                match matching.iter().position(|s| *s == node) {
+                    Some(p) => {
+                        if nth.last {
+                            matching.len() - p
+                        } else {
+                            p + 1
+                        }
+                    }
+                    None => return false,
+                }
+            }
+        };
+        anb_matches(position as i64, nth.a, nth.b)
     }
 
     fn pseudo_class_matches(&self, node: NodeId, pseudo: PseudoClass) -> bool {
