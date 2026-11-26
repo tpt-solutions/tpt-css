@@ -9,12 +9,11 @@
 //!
 //! M1 shorthands: `margin`, `padding`, `border`, `border-width`,
 //! `border-style`, `border-color`, the four `border-<side>` shorthands, and
-//! `background`, which covers only `background-color`. `font`, `list-style`,
-//! `text-decoration` (line, style, color, thickness, skip-ink), and
-//! `border-radius` (including the `/` form) are implemented. `font` has no
-//! `font-variant`, no system fonts, and `list-style` has no
-//! images other than `none`. `background` with images is not implemented; a
-//! declaration that uses it is dropped.
+//! `background` (one image and one color; no layer lists), `font`,
+//! `list-style`, `text-decoration` (line, style, color, thickness, skip-ink),
+//! and `border-radius` (including the `/` form) are implemented. `font` has no
+//! `font-variant`, no system fonts, and `list-style` has no images other than
+//! `none`. A `background` declaration with a layer list is dropped.
 
 use super::parse::{parse_property_value, CssWide, InvalidValue, SpecifiedValue};
 use super::registry::{lookup, spec, Initial};
@@ -181,7 +180,7 @@ pub const SHORTHANDS: &[ShorthandSpec] = &[
     },
     ShorthandSpec {
         name: "background",
-        longhands: &["background-color"],
+        longhands: &["background-color", "background-image"],
         expand: background,
     },
     ShorthandSpec {
@@ -711,16 +710,39 @@ fn side_name(part: &str, side: &str) -> &'static str {
     }
 }
 
-/// `background`: M1 covers only a color.
+/// `background` (CSS Backgrounds 3, one layer): one image and one color, in any
+/// order. Each is optional. An omitted image is `none` and an omitted color is
+/// `transparent`, because the shorthand resets every longhand it covers. Layer
+/// lists (commas between images) are not supported.
 fn background(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> {
     let parts = chunks(values);
-    match parts.as_slice() {
-        [only] => match parse_as("background-color", only)? {
-            SpecifiedValue::CssWide(_) => Err(InvalidValue),
-            v => Ok(vec![("background-color", v)]),
-        },
-        _ => Err(InvalidValue),
+    if parts.is_empty() {
+        return Err(InvalidValue);
     }
+    let mut image = None;
+    let mut color = None;
+    for part in &parts {
+        if let Ok(value) = parse_as("background-image", part) {
+            match value {
+                SpecifiedValue::Value(_) if image.is_none() => image = Some(value),
+                _ => return Err(InvalidValue),
+            }
+        } else {
+            match parse_as("background-color", part)? {
+                SpecifiedValue::Value(_) if color.is_none() => color = Some(part),
+                _ => return Err(InvalidValue),
+            }
+        }
+    }
+    let color = match color {
+        Some(part) => parse_as("background-color", part)?,
+        None => SpecifiedValue::Value(Initial::Transparent.to_value()),
+    };
+    let image = image.unwrap_or(SpecifiedValue::Value(Initial::Keyword("none").to_value()));
+    Ok(vec![
+        ("background-image", image),
+        ("background-color", color),
+    ])
 }
 
 fn margin_expand(v: &[ComponentValue]) -> Result<Expanded, InvalidValue> {

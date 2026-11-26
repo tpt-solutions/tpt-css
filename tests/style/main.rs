@@ -248,8 +248,86 @@ fn parse_value(prop: &str, css_value: &str) -> Option<Value> {
 }
 
 #[test]
+fn pass_through_properties_keep_their_canonical_text() {
+    assert_eq!(
+        parse_value("box-shadow", "0 0  4px   rgba(0, 0, 0, 0.5)"),
+        Some(Value::Raw("0 0 4px rgba(0, 0, 0, 0.5)".to_string()))
+    );
+    // A grammar this engine does not parse is still accepted as text.
+    assert_eq!(
+        parse_value("transform", "translate(10px, [a] \"b\")"),
+        Some(Value::Raw("translate(10px, [a] \"b\")".to_string()))
+    );
+    assert_eq!(
+        parse_value("grid", "none"),
+        Some(Value::Raw("none".to_string()))
+    );
+}
+
+#[test]
+fn background_image_accepts_none_urls_and_image_functions() {
+    assert_eq!(
+        parse_value("background-image", "none"),
+        Some(Value::Keyword("none"))
+    );
+    assert_eq!(
+        parse_value("background-image", "url( 'a.png' )"),
+        Some(Value::Raw("url(\"a.png\")".to_string()))
+    );
+    assert_eq!(
+        parse_value("background-image", "linear-gradient(red, blue),url(b.png)"),
+        Some(Value::Raw(
+            "linear-gradient(red, blue), url(\"b.png\")".to_string()
+        ))
+    );
+    // Not an image, and `none` cannot be part of a list.
+    assert_eq!(parse_value("background-image", "red"), None);
+    assert_eq!(parse_value("background-image", "none, url(a.png)"), None);
+    assert_eq!(parse_value("background-image", "url(a.png) red"), None);
+}
+
+#[test]
+fn counter_properties_parse_names_and_integers() {
+    assert_eq!(
+        parse_value("counter-reset", "a 1 b"),
+        Some(Value::Counters(vec![
+            ("a".to_string(), 1),
+            ("b".to_string(), 0)
+        ]))
+    );
+    assert_eq!(
+        parse_value("counter-increment", "item"),
+        Some(Value::Counters(vec![("item".to_string(), 1)]))
+    );
+    assert_eq!(
+        parse_value("counter-set", "x -3"),
+        Some(Value::Counters(vec![("x".to_string(), -3)]))
+    );
+    assert_eq!(
+        parse_value("counter-reset", "none"),
+        Some(Value::Keyword("none"))
+    );
+    // `none` cannot be a name, an integer alone is not a name, and a list needs a name.
+    assert_eq!(parse_value("counter-reset", "none 1"), None);
+    assert_eq!(parse_value("counter-reset", "1"), None);
+    assert_eq!(parse_value("counter-reset", ""), None);
+}
+
+#[test]
+fn pass_through_initial_values_are_text() {
+    assert_eq!(
+        spec(lookup("flex").unwrap()).initial.to_value(),
+        Value::Raw("0 1 auto".to_string())
+    );
+    assert_eq!(
+        spec(lookup("box-shadow").unwrap()).initial.to_value(),
+        Value::Raw("none".to_string())
+    );
+}
+
+#[test]
 fn registry_has_37_properties_and_ids_match_their_rows() {
-    assert_eq!(PROPERTIES.len(), 88);
+    assert_eq!(PROPERTIES.len(), 97);
     assert_eq!(PROPERTIES[ids::DISPLAY.index()].name, "display");
     assert_eq!(PROPERTIES[ids::COLOR.index()].name, "color");
     assert_eq!(PROPERTIES[ids::FONT_FAMILY.index()].name, "font-family");
@@ -405,4 +483,68 @@ fn every_property_has_a_defining_spec_url() {
     for p in PROPERTIES {
         assert!(p.spec_url.starts_with("https://www.w3.org/"), "{}", p.name);
     }
+}
+
+#[test]
+fn background_shorthand_sets_image_and_color_and_resets_omitted_ones() {
+    use tpt_css::properties::SpecifiedValue;
+    let expand = |css: &str| {
+        let t = tokenize(SourceId(0), css, &ParseLimits::default());
+        let cvs = build_component_values(&t.tokens, 16).unwrap();
+        let idx = tpt_css::properties::shorthand_index("background").unwrap();
+        tpt_css::properties::shorthand::expand(idx, &cvs)
+    };
+    let get = |list: &Vec<(&'static str, SpecifiedValue)>, name: &str| {
+        list.iter().find(|(n, _)| *n == name).unwrap().1.clone()
+    };
+
+    let both = expand("url(a.png) red").unwrap();
+    assert_eq!(
+        get(&both, "background-image"),
+        SpecifiedValue::Value(Value::Raw("url(\"a.png\")".to_string()))
+    );
+    assert_eq!(
+        get(&both, "background-color"),
+        SpecifiedValue::Value(Value::Color(Color::rgb8(255, 0, 0)))
+    );
+
+    // Color alone resets the image to none; image alone resets the color.
+    let color_only = expand("blue").unwrap();
+    assert_eq!(
+        get(&color_only, "background-image"),
+        SpecifiedValue::Value(Value::Keyword("none"))
+    );
+    let image_only = expand("none").unwrap();
+    assert_eq!(
+        get(&image_only, "background-color"),
+        SpecifiedValue::Value(Value::Color(Color::TRANSPARENT))
+    );
+
+    // Two colors, two images, or a layer list are not supported.
+    assert!(expand("red blue").is_err());
+    assert!(expand("url(a.png) url(b.png)").is_err());
+    assert!(expand("url(a.png), url(b.png)").is_err());
+}
+
+#[test]
+fn attr_accepts_a_string_type_and_a_fallback() {
+    use tpt_css::values::ContentItem;
+    let parse = |css: &str| parse_value("content", css);
+    assert_eq!(
+        parse("attr(data-x)"),
+        Some(Value::Content(vec![ContentItem::Attr {
+            name: "data-x".to_string(),
+            fallback: None
+        }]))
+    );
+    assert_eq!(
+        parse("attr(data-x string, \"none\")"),
+        Some(Value::Content(vec![ContentItem::Attr {
+            name: "data-x".to_string(),
+            fallback: Some("none".to_string())
+        }]))
+    );
+    // Other attribute types and extra arguments are not supported.
+    assert_eq!(parse("attr(data-x px)"), None);
+    assert_eq!(parse("attr(data-x, \"a\", \"b\")"), None);
 }

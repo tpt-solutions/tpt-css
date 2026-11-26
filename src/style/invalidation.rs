@@ -144,7 +144,13 @@ impl StyleResolver {
     /// reused from the previous result.
     pub fn restyle<T: StyleTree>(&mut self, tree: &T, env: &Environment) -> &StyleMap {
         let reusable = match &self.cache {
-            Some(cache) => cache.env == *env && !self.full_dirty && self.containers.is_none(),
+            // Counters depend on earlier nodes, so a local restyle cannot compute them.
+            Some(cache) => {
+                cache.env == *env
+                    && !self.full_dirty
+                    && self.containers.is_none()
+                    && !self.counters_used()
+            }
             None => false,
         };
         if !reusable {
@@ -167,10 +173,15 @@ impl StyleResolver {
                 Some(p) if tree.kind(p) == NodeKind::Element => map.get(p).cloned(),
                 _ => None,
             };
+            // Counters are off in this path (see `counters_used` above), so the depth
+            // and exit fields have no effect here.
             let start = Frame {
                 node,
                 parent: parent_style,
                 rem_base: rem_base_for(tree, node, &map, env),
+                depth: 0,
+                exit: false,
+                after: None,
             };
             styled += style_tree(self, tree, start, env, &active, limits, cutoff, &mut map);
         }
@@ -234,7 +245,7 @@ fn collect_content_attrs(decls: &[CompiledDecl], out: &mut BTreeSet<String>) {
         match &decl.value {
             SpecifiedValue::Value(Value::Content(items)) => {
                 for item in items {
-                    if let ContentItem::Attr(name) = item {
+                    if let ContentItem::Attr { name, .. } = item {
                         out.insert(name.clone());
                     }
                 }
@@ -275,6 +286,7 @@ fn collect_simple(simple: &SimpleSelector, out: &mut BTreeSet<String>) {
         SimpleSelector::Not(list) | SimpleSelector::Is(list) | SimpleSelector::Where(list) => {
             collect_list(list, out);
         }
+        SimpleSelector::TimeState { list, .. } => collect_list(list, out),
         SimpleSelector::Has(relatives) => {
             for relative in relatives {
                 collect_complex(&relative.selector, out);

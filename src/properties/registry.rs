@@ -59,6 +59,20 @@ pub enum Grammar {
     Content,
     /// `opacity`: a number, clamped to `[0, 1]`. Percentages are accepted.
     Opacity,
+    /// `background-image`: `none`, or a comma-separated list of `url()` and
+    /// image functions (gradients, `image-set()`, `cross-fade()`). The list is
+    /// stored as canonical text, because images are not loaded here (spec 14.5).
+    Image,
+    /// `counter-reset`, `counter-set`, or `counter-increment`: `none`, or a list
+    /// of counter names, each with an optional integer. `default` is the integer
+    /// used when a name has none (0 for reset and set, 1 for increment).
+    Counters {
+        /// Value used when a counter name has no integer.
+        default: i64,
+    },
+    /// A value this engine does not parse, kept as canonical text for a host to
+    /// read (spec 15.2). Any valid component values are accepted.
+    PassThrough,
     /// `font-stretch`: one of the keywords, or a non-negative percentage.
     FontStretch,
     /// A corner radius: one or two non-negative lengths or percentages
@@ -89,6 +103,8 @@ pub enum Initial {
     CurrentColor,
     /// The generic `serif` family.
     SerifFamily,
+    /// A pass-through value, as canonical text (see `Grammar::PassThrough`).
+    Raw(&'static str),
 }
 
 impl Initial {
@@ -102,6 +118,7 @@ impl Initial {
             Initial::Transparent => Value::Color(Color::TRANSPARENT),
             Initial::CurrentColor => Value::Keyword("currentcolor"),
             Initial::SerifFamily => Value::FontFamily(vec!["serif".to_string()]),
+            Initial::Raw(text) => Value::Raw(text.to_string()),
         }
     }
 }
@@ -126,6 +143,9 @@ const CSS_TEXT: &str = "https://www.w3.org/TR/css-text-3/";
 const CSS_FONTS: &str = "https://www.w3.org/TR/css-fonts-4/";
 const CSS_DISPLAY: &str = "https://www.w3.org/TR/css-display-3/";
 const CSS_BACKGROUNDS: &str = "https://www.w3.org/TR/css-backgrounds-3/";
+const CSS_TRANSITIONS: &str = "https://www.w3.org/TR/css-transitions-1/";
+const CSS_FLEXBOX: &str = "https://www.w3.org/TR/css-flexbox-1/";
+const CSS_GRID: &str = "https://www.w3.org/TR/css-grid-2/";
 const CSS_COLOR: &str = "https://www.w3.org/TR/css-color-4/";
 const CSS_SIZING: &str = "https://www.w3.org/TR/css-sizing-3/";
 
@@ -954,6 +974,78 @@ pub const PROPERTIES: &[PropertySpec] = &[
         grammar: Grammar::Keywords(FONT_VARIANT_CAPS_KEYWORDS),
         spec_url: CSS_FONTS,
     },
+    // 88. Pass-through rows (spec 15.2): parsed as text, not as typed values.
+    PropertySpec {
+        name: "box-shadow",
+        inherited: false,
+        initial: Initial::Raw("none"),
+        grammar: Grammar::PassThrough,
+        spec_url: CSS_BACKGROUNDS,
+    },
+    // 89
+    PropertySpec {
+        name: "transform",
+        inherited: false,
+        initial: Initial::Raw("none"),
+        grammar: Grammar::PassThrough,
+        spec_url: CSS_TRANSFORMS,
+    },
+    // 90
+    PropertySpec {
+        name: "transition",
+        inherited: false,
+        initial: Initial::Raw("all 0s ease 0s"),
+        grammar: Grammar::PassThrough,
+        spec_url: CSS_TRANSITIONS,
+    },
+    // 91
+    PropertySpec {
+        name: "flex",
+        inherited: false,
+        initial: Initial::Raw("0 1 auto"),
+        grammar: Grammar::PassThrough,
+        spec_url: CSS_FLEXBOX,
+    },
+    // 92
+    PropertySpec {
+        name: "grid",
+        inherited: false,
+        initial: Initial::Raw("none"),
+        grammar: Grammar::PassThrough,
+        spec_url: CSS_GRID,
+    },
+    // 93
+    PropertySpec {
+        name: "background-image",
+        inherited: false,
+        initial: Initial::Keyword("none"),
+        grammar: Grammar::Image,
+        spec_url: CSS_BACKGROUNDS,
+    },
+    // 94. Counters (CSS Lists 3, CSS 2.1 section 12.4.1).
+    PropertySpec {
+        name: "counter-reset",
+        inherited: false,
+        initial: Initial::Keyword("none"),
+        grammar: Grammar::Counters { default: 0 },
+        spec_url: CSS_LISTS,
+    },
+    // 95
+    PropertySpec {
+        name: "counter-increment",
+        inherited: false,
+        initial: Initial::Keyword("none"),
+        grammar: Grammar::Counters { default: 1 },
+        spec_url: CSS_LISTS,
+    },
+    // 96
+    PropertySpec {
+        name: "counter-set",
+        inherited: false,
+        initial: Initial::Keyword("none"),
+        grammar: Grammar::Counters { default: 0 },
+        spec_url: CSS_LISTS,
+    },
 ];
 
 const fn offset(name: &'static str) -> PropertySpec {
@@ -1046,6 +1138,12 @@ pub mod ids {
     pub const FONT_WEIGHT: PropertyId = PropertyId(7);
     /// `content`, which decides whether `::before` and `::after` are generated.
     pub const CONTENT: PropertyId = PropertyId(45);
+    /// `counter-reset`
+    pub const COUNTER_RESET: PropertyId = PropertyId(94);
+    /// `counter-increment`
+    pub const COUNTER_INCREMENT: PropertyId = PropertyId(95);
+    /// `counter-set`
+    pub const COUNTER_SET: PropertyId = PropertyId(96);
     /// `border-top-width`, first of the four border widths
     pub const BORDER_TOP_WIDTH: PropertyId = PropertyId(24);
     /// `border-top-style`, first of the four border styles

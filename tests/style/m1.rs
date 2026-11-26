@@ -408,8 +408,31 @@ fn content_attr_reads_the_element_attribute_at_computed_time() {
 }
 
 #[test]
-fn content_attr_with_a_type_or_fallback_is_invalid() {
+fn content_attr_with_an_unsupported_type_is_invalid() {
+    // `string` and a fallback are supported (see `attr_accepts_a_string_type_and_a_fallback`).
     let (t, _, child) = chain();
-    let map = style_with("child::before { content: attr(title, \"x\") }", &t);
+    let map = style_with("child::before { content: attr(title px) }", &t);
     assert!(map.get_pseudo(child, &PseudoElement::Before).is_none());
+}
+
+#[test]
+fn a_missing_attribute_yields_its_fallback_and_a_present_one_wins() {
+    let (mut t, _, child) = chain();
+    let content = |t: &TestTree, css: &str| {
+        let map = style_with(css, t);
+        map.get_pseudo(child, &PseudoElement::Before)
+            .expect("generated")
+            .raw(lookup("content").unwrap())
+            .clone()
+    };
+    let css = "child::before { content: attr(title, \"none\") }";
+    assert_eq!(
+        content(&t, css),
+        tpt_css::values::Value::Strings(vec!["none".to_string()])
+    );
+    t.set_attr(child, "title", "hi");
+    assert_eq!(
+        content(&t, css),
+        tpt_css::values::Value::Strings(vec!["hi".to_string()])
+    );
 }

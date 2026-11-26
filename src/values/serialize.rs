@@ -14,6 +14,12 @@ use super::{color::Color, ContentItem, Value};
 pub fn serialize_value(value: &Value) -> String {
     match value {
         Value::Keyword(k) => (*k).to_string(),
+        Value::Raw(text) => text.clone(),
+        Value::Counters(list) => list
+            .iter()
+            .map(|(name, n)| format!("{name} {n}"))
+            .collect::<Vec<_>>()
+            .join(" "),
         Value::Length { value, unit } => {
             format!("{}{}", format_number(*value), calc::unit_name(*unit))
         }
@@ -47,7 +53,22 @@ pub fn serialize_value(value: &Value) -> String {
                 ContentItem::Text(s) => {
                     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
                 }
-                ContentItem::Attr(name) => format!("attr({name})"),
+                ContentItem::Attr { name, fallback } => match fallback {
+                    None => format!("attr({name})"),
+                    Some(text) => format!(
+                        "attr({name}, \"{}\")",
+                        text.replace('\\', "\\\\").replace('"', "\\\"")
+                    ),
+                },
+                ContentItem::Counter { name, style } => format!("counter({name}, {style})"),
+                ContentItem::Counters {
+                    name,
+                    separator,
+                    style,
+                } => format!(
+                    "counters({name}, \"{}\", {style})",
+                    separator.replace('\\', "\\\\").replace('"', "\\\"")
+                ),
             })
             .collect::<Vec<_>>()
             .join(" "),

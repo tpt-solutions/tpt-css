@@ -37,6 +37,7 @@ use crate::properties::{parse_property_value, CssWide, PropertyId, SpecifiedValu
 use crate::selectors::matching::Matcher;
 use crate::selectors::{PseudoElement, Specificity};
 use crate::style::computed::{compute_value, ComputeContext, ComputedStyle, StyleMap};
+use crate::style::counters::{format_counter, CounterScope};
 use crate::style::custom::{
     contains_var, resolve_customs, substitute, CustomPropertyValue, MapResolver, RegisteredProperty,
 };
@@ -62,6 +63,19 @@ pub enum VisitedPolicy {
     Disabled,
 }
 
+/// How many computed styles are kept per parent for sharing.
+const SHARE_PER_PARENT: usize = 16;
+
+/// A computed style that a later sibling may reuse, with the inputs it was
+/// computed from.
+struct ShareEntry {
+    cas: Cascaded,
+    container: Option<(f64, f64)>,
+    /// The attributes, when a rule reads them through `attr()`.
+    attrs: Option<crate::tree::Attributes>,
+    style: ComputedStyle,
+}
+
 /// Resolver configuration.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ResolverConfig {
@@ -69,6 +83,11 @@ pub struct ResolverConfig {
     pub limits: ParseLimits,
     /// Visited-link policy (spec 20.2).
     pub visited: VisitedPolicy,
+    /// Reuse the computed style of a sibling whose cascade result is identical
+    /// (DESIGN.md decision 35). Off by default until a profile confirms the gain.
+    /// It is not used when any rule uses counters, and not for elements with
+    /// pseudo-elements or assigned slots.
+    pub share_styles: bool,
 }
 
 /// A `@container` condition attached to a rule.
@@ -144,7 +163,7 @@ pub(crate) struct Winner {
 
 /// All candidate declarations for one target: an element, or one pseudo-element.
 /// Winners are picked later, because `revert` needs the lower candidates.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Cascaded {
     pub props: Vec<Vec<Winner>>,
     pub custom: BTreeMap<String, Vec<Winner>>,
@@ -177,6 +196,22 @@ pub(crate) struct Frame {
     pub parent: Option<ComputedStyle>,
     /// Root font size for `rem`. `None` means this element is the root.
     pub rem_base: Option<f64>,
+    /// Number of element ancestors. Counter scopes are keyed by it.
+    pub depth: usize,
+    /// True for the frame that generates `::after`. It is pushed under the
+    /// element's children, so it runs after their counter changes.
+    pub exit: bool,
+    /// The state `::after` needs. Set only on an exit frame.
+    pub after: Option<Box<PendingAfter>>,
+}
+
+/// What an exit frame needs to generate `::after` after the element's subtree.
+#[derive(Debug, Clone)]
+pub(crate) struct PendingAfter {
+    pub style: ComputedStyle,
+    pub cas: Cascaded,
+    pub root_fs: f64,
+    pub container: Option<(f64, f64)>,
 }
 
 /// The last full result, with the environment it was computed for.
@@ -373,6 +408,9 @@ impl StyleResolver {
             node: tree.root(),
             parent: None,
             rem_base: None,
+            depth: 0,
+            exit: false,
+            after: None,
         };
         self.last_restyled = style_tree(self, tree, start, env, &active, limits, false, &mut map);
         self.cache = Some(Cache {
@@ -447,6 +485,44 @@ impl StyleResolver {
     /// is conditional on containers or scopes. Then an element's style depends only
     /// on itself and its parent's computed style, so restyle can stop at an
     /// element whose style did not change.
+    /// Whether any rule uses counters. Counter values depend on earlier nodes in
+    /// document order, so an incremental restyle cannot compute them: the
+    /// resolver falls back to a full resolve when this is true.
+    pub(crate) fn counters_used(&self) -> bool {
+        self.sheets.iter().any(|sheet| {
+            sheet.rules.iter().any(|rule| {
+                rule.decls.iter().any(|decl| match &decl.target {
+                    DeclTarget::Prop(id) => {
+                        *id == ids::COUNTER_RESET
+                            || *id == ids::COUNTER_INCREMENT
+                            || *id == ids::COUNTER_SET
+                            || (*id == ids::CONTENT && content_uses_counter(&decl.value))
+                            || (*id == ids::DISPLAY && display_may_be_list_item(&decl.value))
+                    }
+                    DeclTarget::Custom(_) => false,
+                })
+            })
+        })
+    }
+
+    /// Whether any `content` in a rule reads an attribute with `attr()`.
+    pub(crate) fn attr_used(&self) -> bool {
+        self.sheets.iter().any(|sheet| {
+            sheet.rules.iter().any(|rule| {
+                rule.decls.iter().any(|decl| match &decl.target {
+                    DeclTarget::Prop(id) if *id == ids::CONTENT => match &decl.value {
+                        SpecifiedValue::Value(Value::Content(items)) => items
+                            .iter()
+                            .any(|i| matches!(i, ContentItem::Attr { .. })),
+                        SpecifiedValue::Unparsed { .. } => true,
+                        _ => false,
+                    },
+                    _ => false,
+                })
+            })
+        })
+    }
+
     pub(crate) fn subject_only(&self) -> bool {
         self.sheets.iter().all(|sheet| {
             sheet.rules.iter().all(|rule| {
@@ -786,6 +862,9 @@ fn selector_has_visited(selector: &ComplexSelector) -> bool {
     selector.compounds.iter().any(|compound| {
         compound.simple.iter().any(|simple| match simple {
             SimpleSelector::PseudoClass(PseudoClass::Visited) => true,
+            SimpleSelector::TimeState { list, .. } => {
+                list.selectors.iter().any(selector_has_visited)
+            }
             SimpleSelector::Is(list) | SimpleSelector::Not(list) | SimpleSelector::Where(list) => {
                 list.selectors.iter().any(selector_has_visited)
             }
@@ -811,6 +890,9 @@ fn selector_needs_ancestors(selector: &ComplexSelector) -> bool {
             | SimpleSelector::Scope
             | SimpleSelector::Host(_)
             | SimpleSelector::HostContext(_) => true,
+            SimpleSelector::TimeState { list, .. } => {
+                list.selectors.iter().any(selector_needs_ancestors)
+            }
             SimpleSelector::Not(list) | SimpleSelector::Is(list) | SimpleSelector::Where(list) => {
                 list.selectors.iter().any(selector_needs_ancestors)
             }
@@ -831,6 +913,9 @@ pub(crate) fn selector_is_structural(selector: &ComplexSelector) -> bool {
     selector.compounds.iter().any(|compound| {
         compound.simple.iter().any(|simple| match simple {
             SimpleSelector::Nth(_) | SimpleSelector::PseudoClass(PseudoClass::Empty) => true,
+            SimpleSelector::TimeState { list, .. } => {
+                list.selectors.iter().any(selector_is_structural)
+            }
             SimpleSelector::Not(list) | SimpleSelector::Is(list) | SimpleSelector::Where(list) => {
                 list.selectors.iter().any(selector_is_structural)
             }
@@ -855,41 +940,117 @@ pub(crate) fn style_tree<T: StyleTree>(
     map: &mut StyleMap,
 ) -> usize {
     let mut styled = 0;
+    let mut counters = CounterScope::default();
+    let may_share = resolver.config.share_styles && !resolver.counters_used();
+    let reads_attrs = resolver.attr_used();
+    let mut shared: BTreeMap<Option<NodeId>, Vec<ShareEntry>> = BTreeMap::new();
     let mut stack = vec![start];
     while let Some(frame) = stack.pop() {
+        if frame.exit {
+            // `::after` of an element whose subtree is done (CSS Generated Content 3).
+            if let Some(pending) = frame.after {
+                let pstyle = pseudo_style(
+                    resolver,
+                    tree,
+                    frame.node,
+                    &pending.cas,
+                    Some(&pending.style),
+                    pending.root_fs,
+                    env,
+                    limits,
+                    pending.container,
+                    &mut counters,
+                    frame.depth + 1,
+                );
+                if is_generated(&PseudoElement::After, &pstyle) {
+                    map.insert_pseudo(frame.node, PseudoElement::After, pstyle);
+                }
+            }
+            continue;
+        }
         match tree.kind(frame.node) {
             NodeKind::Element => {
                 let root_fs = frame.rem_base.unwrap_or(env.root_font_size);
                 let container = resolver.nearest_container_size(tree, frame.node);
                 let mut targets = resolver.cascade(tree, frame.node, active);
                 let element_cas = targets.remove(&None).unwrap_or_else(Cascaded::new);
-                let style = compute_style(
-                    &element_cas,
-                    inherited_parent(tree, frame.node, frame.parent.as_ref(), map).as_ref(),
-                    root_fs,
-                    env,
-                    limits,
-                    &resolver.registered,
-                    container,
-                    tree.attributes(frame.node),
-                );
-
-                map.clear_pseudo(frame.node);
-                for (target, cas) in targets {
-                    if let Some(pseudo) = target {
-                        let pstyle = compute_style(
-                            &cas,
-                            Some(&style),
+                counters.enter(frame.depth);
+                // Sharing key: siblings have the same tree parent, so the same parent style
+                // (checked by identity of the entry list). A slotted element inherits from its
+                // slot, so it is never shared.
+                let shareable = may_share
+                    && targets.is_empty()
+                    && tree.assigned_slot(frame.node).is_none();
+                let parent_key = tree.parent(frame.node);
+                let attrs_here = tree.attributes(frame.node);
+                let hit = if shareable {
+                    shared.get(&parent_key).and_then(|entries| {
+                        entries
+                            .iter()
+                            .find(|e| {
+                                e.cas == element_cas
+                                    && e.container == container
+                                    && e.attrs.as_ref().is_none_or(|a| a == attrs_here)
+                            })
+                            .map(|e| e.style.clone())
+                    })
+                } else {
+                    None
+                };
+                let style = match hit {
+                    Some(style) => style,
+                    None => {
+                        let computed = compute_style(
+                            &element_cas,
+                            inherited_parent(tree, frame.node, frame.parent.as_ref(), map).as_ref(),
                             root_fs,
                             env,
                             limits,
                             &resolver.registered,
                             container,
-                            tree.attributes(frame.node),
+                            attrs_here,
+                            &counters,
                         );
-                        if is_generated(&pseudo, &pstyle) {
-                            map.insert_pseudo(frame.node, pseudo, pstyle);
+                        if shareable {
+                            let entries = shared.entry(parent_key).or_default();
+                            if entries.len() < SHARE_PER_PARENT {
+                                entries.push(ShareEntry {
+                                    cas: element_cas.clone(),
+                                    container,
+                                    attrs: reads_attrs.then(|| attrs_here.clone()),
+                                    style: computed.clone(),
+                                });
+                            }
                         }
+                        computed
+                    }
+                };
+                apply_counter_ops(&style, &mut counters, frame.depth, true);
+
+                map.clear_pseudo(frame.node);
+                let mut after = None;
+                for (target, cas) in targets {
+                    match target {
+                        Some(PseudoElement::After) => after = Some(cas),
+                        Some(pseudo) => {
+                            let pstyle = pseudo_style(
+                                resolver,
+                                tree,
+                                frame.node,
+                                &cas,
+                                Some(&style),
+                                root_fs,
+                                env,
+                                limits,
+                                container,
+                                &mut counters,
+                                frame.depth + 1,
+                            );
+                            if is_generated(&pseudo, &pstyle) {
+                                map.insert_pseudo(frame.node, pseudo, pstyle);
+                            }
+                        }
+                        None => {}
                     }
                 }
 
@@ -898,6 +1059,21 @@ pub(crate) fn style_tree<T: StyleTree>(
                 // children are skipped. This only holds when no rule depends on
                 // anything but its own subject (see `StyleResolver::subject_only`).
                 let unchanged = cutoff && map.get(frame.node) == Some(&style);
+                if let Some(cas) = after {
+                    stack.push(Frame {
+                        node: frame.node,
+                        parent: None,
+                        rem_base: None,
+                        depth: frame.depth,
+                        exit: true,
+                        after: Some(Box::new(PendingAfter {
+                            style: style.clone(),
+                            cas,
+                            root_fs,
+                            container,
+                        })),
+                    });
+                }
                 if !unchanged {
                     let child_rem = Some(frame.rem_base.unwrap_or(style.font_size()));
                     for &child in tree.children(frame.node).iter().rev() {
@@ -905,6 +1081,9 @@ pub(crate) fn style_tree<T: StyleTree>(
                             node: child,
                             parent: Some(style.clone()),
                             rem_base: child_rem,
+                            depth: frame.depth + 1,
+                            exit: false,
+                            after: None,
                         });
                     }
                     if let Some(root) = tree.shadow_root(frame.node) {
@@ -912,6 +1091,9 @@ pub(crate) fn style_tree<T: StyleTree>(
                             node: root,
                             parent: Some(style.clone()),
                             rem_base: child_rem,
+                            depth: frame.depth + 1,
+                            exit: false,
+                            after: None,
                         });
                     }
                 }
@@ -932,12 +1114,128 @@ pub(crate) fn style_tree<T: StyleTree>(
                         node: child,
                         parent: inherited.clone(),
                         rem_base: frame.rem_base,
+                        depth: frame.depth,
+                        exit: false,
+                        after: None,
                     });
                 }
             }
         }
     }
     styled
+}
+
+/// Computes a pseudo-element's style. Its counter operations run before its
+/// `content` is read (CSS 2.1 section 12.4.1), so when it has any, the style is
+/// computed again after they are applied.
+#[allow(clippy::too_many_arguments)]
+fn pseudo_style<T: StyleTree>(
+    resolver: &StyleResolver,
+    tree: &T,
+    node: NodeId,
+    cas: &Cascaded,
+    parent: Option<&ComputedStyle>,
+    root_fs: f64,
+    env: &Environment,
+    limits: &ParseLimits,
+    container: Option<(f64, f64)>,
+    counters: &mut CounterScope,
+    depth: usize,
+) -> ComputedStyle {
+    let attrs = tree.attributes(node);
+    let style = compute_style(
+        cas,
+        parent,
+        root_fs,
+        env,
+        limits,
+        &resolver.registered,
+        container,
+        attrs,
+        counters,
+    );
+    if has_counter_ops(&style) {
+        apply_counter_ops(&style, counters, depth, false);
+        return compute_style(
+            cas,
+            parent,
+            root_fs,
+            env,
+            limits,
+            &resolver.registered,
+            container,
+            attrs,
+            counters,
+        );
+    }
+    style
+}
+
+fn has_counter_ops(style: &ComputedStyle) -> bool {
+    [ids::COUNTER_RESET, ids::COUNTER_SET, ids::COUNTER_INCREMENT]
+        .iter()
+        .any(|id| matches!(style.raw(*id), Value::Counters(_)))
+}
+
+/// Applies an element's `counter-reset`, `counter-set`, and `counter-increment`,
+/// in that order, at `depth`.
+///
+/// `element` is true for an element, which is a `display: list-item` box with an
+/// implicit `counter-increment: list-item 1` (CSS Lists 3). That increment comes
+/// before the explicit ones. A pseudo-element does not get it.
+fn apply_counter_ops(
+    style: &ComputedStyle,
+    counters: &mut CounterScope,
+    depth: usize,
+    element: bool,
+) {
+    if let Value::Counters(list) = style.raw(ids::COUNTER_RESET) {
+        for (name, value) in list {
+            counters.reset(name, *value, depth);
+        }
+    }
+    if let Value::Counters(list) = style.raw(ids::COUNTER_SET) {
+        for (name, value) in list {
+            counters.set(name, *value, depth);
+        }
+    }
+    if element && is_list_item(style) {
+        counters.increment("list-item", 1, depth);
+    }
+    if let Value::Counters(list) = style.raw(ids::COUNTER_INCREMENT) {
+        for (name, by) in list {
+            counters.increment(name, *by, depth);
+        }
+    }
+}
+
+fn is_list_item(style: &ComputedStyle) -> bool {
+    matches!(style.raw(ids::DISPLAY), Value::Keyword("list-item"))
+}
+
+/// Whether a specified `display` may be `list-item`, which makes an element
+/// count. A `var()` value might be, so it counts.
+fn display_may_be_list_item(value: &SpecifiedValue) -> bool {
+    match value {
+        SpecifiedValue::Value(Value::Keyword(k)) => *k == "list-item",
+        SpecifiedValue::Value(_) => false,
+        _ => true,
+    }
+}
+
+/// Whether a specified `content` value refers to a counter. A `var()` value is
+/// not known until computed, so it counts as a counter use.
+fn content_uses_counter(value: &SpecifiedValue) -> bool {
+    match value {
+        SpecifiedValue::Value(Value::Content(items)) => items.iter().any(|i| {
+            matches!(
+                i,
+                ContentItem::Counter { .. } | ContentItem::Counters { .. }
+            )
+        }),
+        SpecifiedValue::Unparsed { .. } => true,
+        _ => false,
+    }
 }
 
 /// A pseudo-element is generated when its `content` is not `none` or `normal`,
@@ -979,6 +1277,7 @@ fn compute_style(
     registered: &BTreeMap<String, RegisteredProperty>,
     container: Option<(f64, f64)>,
     attrs: &Attributes,
+    counters: &CounterScope,
 ) -> ComputedStyle {
     let declared: BTreeMap<String, SpecifiedValue> = cas
         .custom
@@ -1012,7 +1311,7 @@ fn compute_style(
     for idx in compute_order() {
         let id = PropertyId(idx as u16);
         let specified = specified_value(idx, &cas.props[idx], parent, &customs, limits);
-        let specified = substitute_attrs(specified, attrs);
+        let specified = substitute_content(specified, attrs, counters);
         let computed = compute_value(id, spec(id).grammar, specified, &ctx);
         if id == ids::FONT_SIZE {
             if let Value::Length { value, .. } = computed {
@@ -1043,16 +1342,34 @@ fn compute_style(
     ComputedStyle::from_values(values, customs)
 }
 
-/// Replaces `attr()` in a `content` value with the element's attribute values
-/// (CSS Generated Content 3). Missing attributes contribute the empty string.
-fn substitute_attrs(value: Value, attrs: &Attributes) -> Value {
+/// Replaces `attr()` and `counter()` in a `content` value with the element's
+/// attribute values and the counters in scope (CSS Generated Content 3).
+/// Missing attributes contribute the empty string. Styles are validated at parse
+/// time, so every counter style here is known.
+fn substitute_content(value: Value, attrs: &Attributes, counters: &CounterScope) -> Value {
     match value {
         Value::Content(items) => {
             let strings = items
                 .into_iter()
                 .map(|item| match item {
                     ContentItem::Text(s) => s,
-                    ContentItem::Attr(name) => attrs.get(&name).unwrap_or("").to_string(),
+                    ContentItem::Attr { name, fallback } => match attrs.get(&name) {
+                        Some(value) => value.to_string(),
+                        None => fallback.unwrap_or_default(),
+                    },
+                    ContentItem::Counter { name, style } => {
+                        format_counter(counters.value(&name), &style).unwrap_or_default()
+                    }
+                    ContentItem::Counters {
+                        name,
+                        separator,
+                        style,
+                    } => counters
+                        .values(&name)
+                        .into_iter()
+                        .map(|v| format_counter(v, &style).unwrap_or_default())
+                        .collect::<Vec<_>>()
+                        .join(&separator),
                 })
                 .collect();
             Value::Strings(strings)

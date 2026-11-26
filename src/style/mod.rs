@@ -9,6 +9,7 @@
 //! in [`custom`]. Incremental restyle is in [`invalidation`].
 
 pub mod computed;
+pub(crate) mod counters;
 pub mod custom;
 pub mod inspect;
 pub mod invalidation;

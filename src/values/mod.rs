@@ -15,6 +15,7 @@
 pub mod calc;
 pub mod color;
 pub mod length;
+pub mod raw;
 pub mod serialize;
 
 pub use calc::CalcNode;
@@ -69,9 +70,33 @@ pub enum LengthUnit {
 pub enum ContentItem {
     /// A quoted string.
     Text(String),
-    /// `attr(name)`: the value of the element's attribute `name`, read at
-    /// computed-value time. A missing attribute contributes the empty string.
-    Attr(String),
+    /// `attr(name)` or `attr(name, "fallback")`: the value of the element's
+    /// attribute `name`, read at computed-value time. A missing attribute
+    /// contributes the fallback, or the empty string without one.
+    Attr {
+        /// Attribute name, lowercased.
+        name: String,
+        /// Text used when the attribute is missing.
+        fallback: Option<String>,
+    },
+    /// `counter(name, style)`: the innermost value of the counter, formatted in
+    /// `style` (a list style name, already validated).
+    Counter {
+        /// Counter name.
+        name: String,
+        /// List style name.
+        style: String,
+    },
+    /// `counters(name, separator, style)`: every value of the counter in scope,
+    /// outermost first, joined by `separator`.
+    Counters {
+        /// Counter name.
+        name: String,
+        /// Text between the values.
+        separator: String,
+        /// List style name.
+        style: String,
+    },
 }
 
 /// A typed property value, used for both specified and computed values.
@@ -111,6 +136,12 @@ pub enum Value {
         /// Vertical radius.
         vertical: Box<Value>,
     },
+    /// Counter operations for `counter-reset`, `counter-set`, or
+    /// `counter-increment`: each counter name with its integer.
+    Counters(Vec<(String, i64)>),
+    /// The canonical text of a pass-through value (`box-shadow`, `transform`,
+    /// `transition`, `flex`, `grid`). This engine does not parse these grammars.
+    Raw(String),
     /// A `light-dark(light, dark)` color pair, resolved at computed-value time
     /// from the color scheme (CSS Color 5).
     LightDark(Color, Color),
