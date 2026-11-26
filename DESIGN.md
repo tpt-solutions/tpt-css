@@ -485,12 +485,21 @@ engineering measurements, not claims about other machines (spec 21.1).
     plus computing every property for every element. A real sheet takes 89 ms, so
     selector matching and the cascade take about 6 ms. Sharing a computed style
     between elements saves the computation, not the matching. Computation is where
-    the time goes, so sharing is worth building, but a cheaper first step is to
-    stop allocating per element in `compute_style`. It starts from
-    `PROPERTIES.iter().map(initial.to_value())` for all 88 properties and clones
-    each specified value, and that setup is paid for every element. Recommended
-    order: (a) remove that per-element setup and measure; (b) then share, if
-    computation is still most of the time.
+    the time goes. Two follow-up measurements narrow the cause, and neither is a
+    single hotspot:
+    - Replacing the 88-value initial pre-fill in `compute_style` with a cheap
+      placeholder made no measurable difference (84 ms against 85 to 87 ms), so
+      it was reverted.
+    - Cloning one computed style, which `style_tree` does once per element to
+      pass the parent's style to its children, takes about 0.7 µs
+      (`computed_style_clone_cost`). That is about 8% of the roughly 8.5 µs each
+      element costs.
+    The remaining cost is spread over the per-property work (specified value,
+    compute, store) and the per-element cascade setup. A sampling profile would
+    settle it. `samply` was tried on this Windows machine and hung without
+    producing a profile, so a profile needs another machine or tool. Sharing
+    skips all of that per-property work on a hit, so it remains the largest
+    lever. Build it once a profile confirms that per-property work dominates.
 
     Sharing key, for an element (not a pseudo-element, which is never shared):
     the parent's computed style (compared by value, since inherited properties
