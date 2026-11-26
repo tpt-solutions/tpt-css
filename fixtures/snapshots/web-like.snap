@@ -1,0 +1,93 @@
+0 html
+0.0 body
+  color: rgb(34, 34, 34)
+  font-family: "Helvetica Neue", sans-serif
+  border-top-color: rgb(34, 34, 34)
+  border-right-color: rgb(34, 34, 34)
+  border-bottom-color: rgb(34, 34, 34)
+  border-left-color: rgb(34, 34, 34)
+  text-decoration-color: rgb(34, 34, 34)
+0.0.0 nav
+  color: rgb(34, 34, 34)
+  font-family: "Helvetica Neue", sans-serif
+  border-top-color: rgb(34, 34, 34)
+  border-right-color: rgb(34, 34, 34)
+  border-bottom-color: rgb(34, 34, 34)
+  border-left-color: rgb(34, 34, 34)
+  text-decoration-color: rgb(34, 34, 34)
+0.0.0.0 a
+  color: rgb(26, 115, 232)
+  font-family: "Helvetica Neue", sans-serif
+  font-weight: 700
+  padding-top: 4px
+  padding-right: 4px
+  padding-bottom: 4px
+  padding-left: 4px
+  border-top-color: rgb(26, 115, 232)
+  border-right-color: rgb(26, 115, 232)
+  border-bottom-color: rgb(26, 115, 232)
+  border-left-color: rgb(26, 115, 232)
+  text-decoration-color: rgb(26, 115, 232)
+0.0.0.1 a
+  color: rgb(26, 115, 232)
+  font-family: "Helvetica Neue", sans-serif
+  padding-top: 4px
+  padding-right: 4px
+  padding-bottom: 4px
+  padding-left: 4px
+  border-top-color: rgb(26, 115, 232)
+  border-right-color: rgb(26, 115, 232)
+  border-bottom-color: rgb(26, 115, 232)
+  border-left-color: rgb(26, 115, 232)
+  text-decoration-color: rgb(26, 115, 232)
+0.0.1 main
+  color: rgb(34, 34, 34)
+  font-family: "Helvetica Neue", sans-serif
+  border-top-color: rgb(34, 34, 34)
+  border-right-color: rgb(34, 34, 34)
+  border-bottom-color: rgb(34, 34, 34)
+  border-left-color: rgb(34, 34, 34)
+  text-decoration-color: rgb(34, 34, 34)
+0.0.1.0 article
+  color: rgb(34, 34, 34)
+  background-color: rgb(245, 245, 245)
+  font-family: "Helvetica Neue", sans-serif
+  border-top-color: rgb(34, 34, 34)
+  border-right-color: rgb(34, 34, 34)
+  border-bottom-color: rgb(34, 34, 34)
+  border-left-color: rgb(34, 34, 34)
+  text-decoration-color: rgb(34, 34, 34)
+0.0.1.0.0 p
+  color: rgb(34, 34, 34)
+  font-family: "Helvetica Neue", sans-serif
+  border-top-color: rgb(34, 34, 34)
+  border-right-color: rgb(34, 34, 34)
+  border-bottom-color: rgb(34, 34, 34)
+  border-left-color: rgb(34, 34, 34)
+  text-decoration-color: rgb(34, 34, 34)
+0.0.1.0.1 p
+  color: rgb(34, 34, 34)
+  font-family: "Helvetica Neue", sans-serif
+  margin-top: 4px
+  border-top-color: rgb(34, 34, 34)
+  border-right-color: rgb(34, 34, 34)
+  border-bottom-color: rgb(34, 34, 34)
+  border-left-color: rgb(34, 34, 34)
+  text-decoration-color: rgb(34, 34, 34)
+0.0.1.1 article
+  color: rgb(34, 34, 34)
+  font-family: "Helvetica Neue", sans-serif
+  border-top-color: rgb(34, 34, 34)
+  border-right-color: rgb(34, 34, 34)
+  border-bottom-color: rgb(34, 34, 34)
+  border-left-color: rgb(34, 34, 34)
+  text-decoration-color: rgb(34, 34, 34)
+0.0.1.1.0 p
+  display: none
+  color: rgb(34, 34, 34)
+  font-family: "Helvetica Neue", sans-serif
+  border-top-color: rgb(34, 34, 34)
+  border-right-color: rgb(34, 34, 34)
+  border-bottom-color: rgb(34, 34, 34)
+  border-left-color: rgb(34, 34, 34)
+  text-decoration-color: rgb(34, 34, 34)

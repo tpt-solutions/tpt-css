@@ -1,0 +1,26 @@
+{
+  "viewport": { "width": 480, "height": 800 },
+  "root": {
+    "element": "html",
+    "children": [
+      { "element": "body",
+        "children": [
+          { "element": "nav",
+            "children": [
+              { "element": "a", "children": [ { "text": "Home" } ] },
+              { "element": "a", "children": [ { "text": "About" } ] }
+            ] },
+          { "element": "main",
+            "children": [
+              { "element": "article",
+                "children": [
+                  { "element": "p", "children": [ { "text": "one" } ] },
+                  { "element": "p", "children": [ { "text": "two" } ] }
+                ] },
+              { "element": "article",
+                "children": [ { "element": "p" } ] }
+            ] }
+        ] }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "root": {
+    "element": "app",
+    "children": [
+      { "element": "div", "class": "card",
+        "children": [
+          { "element": "panel",
+            "children": [ { "element": "label", "children": [ { "text": "Name" } ] } ] }
+        ] },
+      { "element": "button", "class": "primary", "children": [ { "text": "Go" } ] }
+    ]
+  }
+}

@@ -9,11 +9,22 @@ mod appfront;
 #[path = "../common/mod.rs"]
 mod common;
 mod container;
+mod counters;
+#[path = "../../tools/fixture.rs"]
+#[allow(dead_code)]
+mod fixture;
 mod invalidation;
+#[path = "../../tools/json.rs"]
+#[allow(dead_code)]
+mod json;
 mod perf;
 mod property;
+mod snapshots;
 mod spec_trace;
+mod support;
 mod web_like;
+#[cfg(feature = "web")]
+mod web_markup;
 
 use common::{style_of, TestTree};
 use tpt_css::cascade::origin::Origin;

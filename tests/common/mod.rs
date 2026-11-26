@@ -7,6 +7,8 @@
 
 #![allow(dead_code)]
 
+pub mod markup;
+
 use tpt_css::ast::Declaration;
 use tpt_css::parse::ParsedStylesheet;
 use tpt_css::tree::node::NamespaceId;
