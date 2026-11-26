@@ -8,13 +8,17 @@
 //! (spec 20.3) bounds the work; when it runs out the selector does not match,
 //! so the engine fails closed.
 //!
+//! [`Matcher`] carries the context for one match: the tree, the remaining step
+//! budget, and the scope root for `:scope`. `:has()` matches relative to an
+//! anchor element, so its leftmost compound is checked against that anchor.
+//!
 //! Structural pseudo-classes read element siblings through the tree contract.
 //! Each such check scans the sibling list, so wide trees cost O(siblings) per
-//! node. An index is future work (M3).
+//! node. An index is M3 work (see TODO.md).
 
 use crate::ast::selector::{
     AttributeOperator, Combinator, ComplexSelector, CompoundSelector, NthSelector, PseudoClass,
-    SelectorList, SimpleSelector,
+    RelativeSelector, SelectorList, SimpleSelector,
 };
 use crate::selectors::specificity::Specificity;
 use crate::tree::{Direction, NodeId, NodeKind, StateBits, StyleTree};
@@ -29,8 +33,8 @@ pub fn match_selector_list<T: StyleTree>(
 ) -> Option<Specificity> {
     let mut best: Option<Specificity> = None;
     for selector in &list.selectors {
-        let mut budget = max_steps;
-        if matches_complex(tree, node, selector, &mut budget) {
+        let mut matcher = Matcher::new(tree, max_steps, None);
+        if matcher.matches(node, selector) {
             best = Some(match best {
                 Some(b) if b >= selector.specificity => b,
                 _ => selector.specificity,
@@ -40,161 +44,362 @@ pub fn match_selector_list<T: StyleTree>(
     best
 }
 
-/// True if `node` matches the element part of the complex selector.
-/// `budget` is decremented per step and matching stops at zero.
+/// True if `node` matches the element part of the complex selector. `budget` is
+/// decremented per step and matching stops at zero.
 pub fn matches_complex<T: StyleTree>(
     tree: &T,
     node: NodeId,
     selector: &ComplexSelector,
     budget: &mut usize,
 ) -> bool {
-    match selector.compounds.len() {
-        0 => false,
-        n => match_from(tree, node, selector, n - 1, budget),
-    }
+    let mut matcher = Matcher {
+        tree,
+        budget: *budget,
+        scope: None,
+    };
+    let result = matcher.matches(node, selector);
+    *budget = matcher.budget;
+    result
 }
 
-fn charge(budget: &mut usize) -> bool {
-    if *budget == 0 {
-        return false;
-    }
-    *budget -= 1;
-    true
+/// The context of one selector match.
+pub struct Matcher<'a, T: StyleTree> {
+    tree: &'a T,
+    budget: usize,
+    scope: Option<NodeId>,
 }
 
-fn is_element<T: StyleTree>(tree: &T, node: NodeId) -> bool {
-    tree.kind(node) == NodeKind::Element
-}
-
-fn list_matches<T: StyleTree>(
-    tree: &T,
+/// The relation a leftmost compound must have to an anchor element.
+#[derive(Clone, Copy)]
+struct Anchor {
     node: NodeId,
-    list: &SelectorList,
-    budget: &mut usize,
-) -> bool {
-    list.selectors
-        .iter()
-        .any(|s| matches_complex(tree, node, s, budget))
+    relation: Combinator,
 }
 
-/// Precondition: `node` is the candidate for `compounds[idx]`.
-fn match_from<T: StyleTree>(
-    tree: &T,
-    node: NodeId,
-    selector: &ComplexSelector,
-    idx: usize,
-    budget: &mut usize,
-) -> bool {
-    if !charge(budget) {
-        return false;
-    }
-    if !is_element(tree, node) || !compound_matches(tree, node, &selector.compounds[idx], budget) {
-        return false;
-    }
-    if idx == 0 {
-        return true;
-    }
-    match selector.combinators[idx - 1] {
-        Combinator::Child => match tree.parent(node) {
-            Some(parent) => match_from(tree, parent, selector, idx - 1, budget),
-            None => false,
-        },
-        Combinator::Descendant => {
-            let mut current = tree.parent(node);
-            while let Some(ancestor) = current {
-                if !charge(budget) {
-                    return false;
-                }
-                if match_from(tree, ancestor, selector, idx - 1, budget) {
-                    return true;
-                }
-                current = tree.parent(ancestor);
-            }
-            false
-        }
-        Combinator::NextSibling => match previous_element_siblings(tree, node).first() {
-            Some(&prev) => match_from(tree, prev, selector, idx - 1, budget),
-            None => false,
-        },
-        Combinator::SubsequentSibling => {
-            for prev in previous_element_siblings(tree, node) {
-                if !charge(budget) {
-                    return false;
-                }
-                if match_from(tree, prev, selector, idx - 1, budget) {
-                    return true;
-                }
-            }
-            false
+impl<'a, T: StyleTree> Matcher<'a, T> {
+    /// Creates a matcher with a step budget and an optional `:scope` root.
+    pub fn new(tree: &'a T, max_steps: usize, scope: Option<NodeId>) -> Self {
+        Matcher {
+            tree,
+            budget: max_steps,
+            scope,
         }
     }
-}
 
-/// All element siblings of `node` including itself, in document order. A
-/// parentless node is its own only sibling.
-fn element_siblings<T: StyleTree>(tree: &T, node: NodeId) -> Vec<NodeId> {
-    match tree.parent(node) {
-        None => vec![node],
-        Some(p) => tree
-            .children(p)
-            .iter()
-            .copied()
-            .filter(|c| is_element(tree, *c))
-            .collect(),
+    /// True if `node` matches the complex selector's element part.
+    pub fn matches(&mut self, node: NodeId, selector: &ComplexSelector) -> bool {
+        match selector.compounds.len() {
+            0 => false,
+            n => self.match_from(node, selector, n - 1, None),
+        }
     }
-}
 
-/// Element siblings before `node`, nearest first.
-fn previous_element_siblings<T: StyleTree>(tree: &T, node: NodeId) -> Vec<NodeId> {
-    let sibs = element_siblings(tree, node);
-    match sibs.iter().position(|s| *s == node) {
-        Some(pos) => sibs[..pos].iter().rev().copied().collect(),
-        None => Vec::new(),
+    /// True if `node` matches any member of `list`, sharing this matcher's budget.
+    pub fn matches_any(&mut self, node: NodeId, list: &SelectorList) -> bool {
+        self.list_matches(node, list)
     }
-}
 
-fn compound_matches<T: StyleTree>(
-    tree: &T,
-    node: NodeId,
-    compound: &CompoundSelector,
-    budget: &mut usize,
-) -> bool {
-    compound
-        .simple
-        .iter()
-        .all(|s| simple_matches(tree, node, s, budget))
-}
+    fn charge(&mut self) -> bool {
+        if self.budget == 0 {
+            return false;
+        }
+        self.budget -= 1;
+        true
+    }
 
-fn simple_matches<T: StyleTree>(
-    tree: &T,
-    node: NodeId,
-    simple: &SimpleSelector,
-    budget: &mut usize,
-) -> bool {
-    match simple {
-        SimpleSelector::Universal => true,
-        // Replaced during nesting resolution. A bare `&` reaching the matcher is
-        // a top-level rule and matches nothing.
-        SimpleSelector::Nesting => false,
-        SimpleSelector::Type(local) => tree.name(node).local == *local,
-        SimpleSelector::Id(id) => tree.attributes(node).id.as_deref() == Some(id.as_str()),
-        SimpleSelector::Class(class) => tree.attributes(node).has_class(class),
-        SimpleSelector::Attribute(attr) => match tree.attributes(node).get(&attr.name) {
-            None => false,
-            Some(actual) => match &attr.matcher {
+    fn is_element(&self, node: NodeId) -> bool {
+        self.tree.kind(node) == NodeKind::Element
+    }
+
+    /// Precondition: `node` is the candidate for `compounds[idx]`.
+    fn match_from(
+        &mut self,
+        node: NodeId,
+        selector: &ComplexSelector,
+        idx: usize,
+        anchor: Option<Anchor>,
+    ) -> bool {
+        if !self.charge() {
+            return false;
+        }
+        if !self.is_element(node) || !self.compound_matches(node, &selector.compounds[idx]) {
+            return false;
+        }
+        if idx == 0 {
+            return match anchor {
                 None => true,
-                Some(m) => attribute_value_matches(m.operator, actual, &m.value),
-            },
-        },
-        SimpleSelector::PseudoClass(pseudo) => pseudo_class_matches(tree, node, *pseudo),
-        SimpleSelector::Nth(nth) => nth_matches(tree, node, nth, budget),
-        SimpleSelector::Not(list) => !list_matches(tree, node, list, budget),
-        SimpleSelector::Is(list) | SimpleSelector::Where(list) => {
-            list_matches(tree, node, list, budget)
+                Some(a) => self.related(node, a),
+            };
         }
-        SimpleSelector::Lang(tag) => language_matches(tree, node, tag),
-        SimpleSelector::Dir(dir) => inherited_direction(tree, node) == Some(*dir),
+        match selector.combinators[idx - 1] {
+            Combinator::Child => match self.tree.parent(node) {
+                Some(parent) => self.match_from(parent, selector, idx - 1, anchor),
+                None => false,
+            },
+            Combinator::Descendant => {
+                let mut current = self.tree.parent(node);
+                while let Some(ancestor) = current {
+                    if !self.charge() {
+                        return false;
+                    }
+                    if self.match_from(ancestor, selector, idx - 1, anchor) {
+                        return true;
+                    }
+                    current = self.tree.parent(ancestor);
+                }
+                false
+            }
+            Combinator::NextSibling => match self.previous_element_siblings(node).first() {
+                Some(&prev) => self.match_from(prev, selector, idx - 1, anchor),
+                None => false,
+            },
+            Combinator::SubsequentSibling => {
+                for prev in self.previous_element_siblings(node) {
+                    if !self.charge() {
+                        return false;
+                    }
+                    if self.match_from(prev, selector, idx - 1, anchor) {
+                        return true;
+                    }
+                }
+                false
+            }
+        }
     }
+
+    /// True if `node` has the relation to the anchor (for `:has()`).
+    fn related(&self, node: NodeId, anchor: Anchor) -> bool {
+        match anchor.relation {
+            Combinator::Child => self.tree.parent(node) == Some(anchor.node),
+            Combinator::Descendant => {
+                let mut current = self.tree.parent(node);
+                while let Some(p) = current {
+                    if p == anchor.node {
+                        return true;
+                    }
+                    current = self.tree.parent(p);
+                }
+                false
+            }
+            Combinator::NextSibling => {
+                self.previous_element_siblings(node).first() == Some(&anchor.node)
+            }
+            Combinator::SubsequentSibling => {
+                self.previous_element_siblings(node).contains(&anchor.node)
+            }
+        }
+    }
+
+    /// All element siblings of `node` including itself, in document order. A
+    /// parentless node is its own only sibling.
+    fn element_siblings(&self, node: NodeId) -> Vec<NodeId> {
+        match self.tree.parent(node) {
+            None => vec![node],
+            Some(p) => self
+                .tree
+                .children(p)
+                .iter()
+                .copied()
+                .filter(|c| self.tree.kind(*c) == NodeKind::Element)
+                .collect(),
+        }
+    }
+
+    /// Element siblings before `node`, nearest first.
+    fn previous_element_siblings(&self, node: NodeId) -> Vec<NodeId> {
+        let sibs = self.element_siblings(node);
+        match sibs.iter().position(|s| *s == node) {
+            Some(pos) => sibs[..pos].iter().rev().copied().collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Element siblings after `node`, nearest first.
+    fn following_element_siblings(&self, node: NodeId) -> Vec<NodeId> {
+        let sibs = self.element_siblings(node);
+        match sibs.iter().position(|s| *s == node) {
+            Some(pos) => sibs[pos + 1..].to_vec(),
+            None => Vec::new(),
+        }
+    }
+
+    fn compound_matches(&mut self, node: NodeId, compound: &CompoundSelector) -> bool {
+        compound.simple.iter().all(|s| self.simple_matches(node, s))
+    }
+
+    fn list_matches(&mut self, node: NodeId, list: &SelectorList) -> bool {
+        list.selectors.iter().any(|s| self.matches_in_list(node, s))
+    }
+
+    /// Matches a complex selector nested in a functional pseudo-class. The step
+    /// budget is shared with the enclosing match.
+    fn matches_in_list(&mut self, node: NodeId, selector: &ComplexSelector) -> bool {
+        self.matches(node, selector)
+    }
+
+    fn simple_matches(&mut self, node: NodeId, simple: &SimpleSelector) -> bool {
+        match simple {
+            SimpleSelector::Universal => true,
+            // Replaced during nesting resolution. A bare `&` reaching the matcher is
+            // a top-level rule and matches nothing.
+            SimpleSelector::Nesting => false,
+            SimpleSelector::Type(local) => self.tree.name(node).local == *local,
+            SimpleSelector::Id(id) => self.tree.attributes(node).id.as_deref() == Some(id.as_str()),
+            SimpleSelector::Class(class) => self.tree.attributes(node).has_class(class),
+            SimpleSelector::Attribute(attr) => match self.tree.attributes(node).get(&attr.name) {
+                None => false,
+                Some(actual) => match &attr.matcher {
+                    None => true,
+                    Some(m) => attribute_value_matches(m.operator, actual, &m.value),
+                },
+            },
+            SimpleSelector::PseudoClass(pseudo) => self.pseudo_class_matches(node, *pseudo),
+            SimpleSelector::Nth(nth) => self.nth_matches(node, nth),
+            SimpleSelector::Not(list) => !self.list_matches(node, list),
+            SimpleSelector::Is(list) | SimpleSelector::Where(list) => self.list_matches(node, list),
+            SimpleSelector::Lang(tag) => language_matches(self.tree, node, tag),
+            SimpleSelector::Dir(dir) => inherited_direction(self.tree, node) == Some(*dir),
+            SimpleSelector::Has(relatives) => self.has_matches(node, relatives),
+            SimpleSelector::Scope => match self.scope {
+                Some(root) => node == root,
+                None => is_root(self.tree, node),
+            },
+        }
+    }
+
+    /// `:has(relatives)`: some element related to `node` matches a relative
+    /// selector, with the relation given by its leading combinator.
+    fn has_matches(&mut self, node: NodeId, relatives: &[RelativeSelector]) -> bool {
+        for relative in relatives {
+            let candidates = self.relative_candidates(node, relative.leading);
+            for candidate in candidates {
+                let selector = &relative.selector;
+                if selector.compounds.is_empty() {
+                    continue;
+                }
+                let anchor = Anchor {
+                    node,
+                    relation: relative.leading,
+                };
+                if self.match_from(
+                    candidate,
+                    selector,
+                    selector.compounds.len() - 1,
+                    Some(anchor),
+                ) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// The elements a relative selector can reach from `node`.
+    fn relative_candidates(&self, node: NodeId, leading: Combinator) -> Vec<NodeId> {
+        match leading {
+            Combinator::Child => self
+                .tree
+                .children(node)
+                .iter()
+                .copied()
+                .filter(|c| self.is_element(*c))
+                .collect(),
+            Combinator::Descendant => {
+                let mut out = Vec::new();
+                let mut stack: Vec<NodeId> =
+                    self.tree.children(node).iter().rev().copied().collect();
+                while let Some(n) = stack.pop() {
+                    if self.is_element(n) {
+                        out.push(n);
+                    }
+                    stack.extend(self.tree.children(n).iter().rev().copied());
+                }
+                out
+            }
+            Combinator::NextSibling => self
+                .following_element_siblings(node)
+                .into_iter()
+                .take(1)
+                .collect(),
+            Combinator::SubsequentSibling => self.following_element_siblings(node),
+        }
+    }
+
+    fn nth_matches(&mut self, node: NodeId, nth: &NthSelector) -> bool {
+        if let Some(of) = &nth.of {
+            if !self.list_matches(node, of) {
+                return false;
+            }
+        }
+        let mut sibs = self.element_siblings(node);
+        if nth.of_type {
+            let name = self.tree.name(node).local.clone();
+            sibs.retain(|s| self.tree.name(*s).local == name);
+        }
+        if let Some(of) = &nth.of {
+            let mut filtered = Vec::with_capacity(sibs.len());
+            for s in sibs {
+                if self.list_matches(s, of) {
+                    filtered.push(s);
+                }
+            }
+            sibs = filtered;
+        }
+        if nth.last {
+            sibs.reverse();
+        }
+        match sibs.iter().position(|s| *s == node) {
+            Some(pos) => anb_matches((pos + 1) as i64, nth.a, nth.b),
+            None => false,
+        }
+    }
+
+    fn pseudo_class_matches(&self, node: NodeId, pseudo: PseudoClass) -> bool {
+        let state = self.tree.state(node).bits;
+        match pseudo {
+            PseudoClass::Root => is_root(self.tree, node),
+            PseudoClass::Empty => is_empty(self.tree, node),
+            other => state_bit_matches(state, other),
+        }
+    }
+}
+
+/// The state bit a state pseudo-class reads (spec 9.2).
+fn state_bit_matches(state: StateBits, pseudo: PseudoClass) -> bool {
+    let bit = match pseudo {
+        PseudoClass::Hover => StateBits::HOVER,
+        PseudoClass::Active => StateBits::ACTIVE,
+        PseudoClass::Focus => StateBits::FOCUS,
+        PseudoClass::Enabled => StateBits::ENABLED,
+        PseudoClass::Disabled => StateBits::DISABLED,
+        PseudoClass::Checked => StateBits::CHECKED,
+        PseudoClass::Required => StateBits::REQUIRED,
+        PseudoClass::Optional => StateBits::OPTIONAL,
+        PseudoClass::ReadOnly => StateBits::READ_ONLY,
+        PseudoClass::ReadWrite => StateBits::READ_WRITE,
+        PseudoClass::PlaceholderShown => StateBits::PLACEHOLDER_SHOWN,
+        PseudoClass::Link => StateBits::LINK,
+        PseudoClass::AnyLink => StateBits::ANY_LINK,
+        PseudoClass::Visited => StateBits::VISITED,
+        PseudoClass::FocusVisible => StateBits::FOCUS_VISIBLE,
+        PseudoClass::FocusWithin => StateBits::FOCUS_WITHIN,
+        PseudoClass::Target => StateBits::TARGET,
+        PseudoClass::Valid => StateBits::VALID,
+        PseudoClass::Invalid => StateBits::INVALID,
+        PseudoClass::UserValid => StateBits::USER_VALID,
+        PseudoClass::UserInvalid => StateBits::USER_INVALID,
+        PseudoClass::InRange => StateBits::IN_RANGE,
+        PseudoClass::OutOfRange => StateBits::OUT_OF_RANGE,
+        PseudoClass::Default => StateBits::DEFAULT,
+        PseudoClass::Indeterminate => StateBits::INDETERMINATE,
+        PseudoClass::Open => StateBits::OPEN,
+        PseudoClass::Closed => StateBits::CLOSED,
+        PseudoClass::Modal => StateBits::MODAL,
+        PseudoClass::PopoverOpen => StateBits::POPOVER_OPEN,
+        // Structural pseudo-classes are handled by the caller.
+        PseudoClass::Root | PseudoClass::Empty => return false,
+    };
+    state.contains(bit)
 }
 
 fn attribute_value_matches(op: AttributeOperator, actual: &str, expected: &str) -> bool {
@@ -222,77 +427,6 @@ pub fn anb_matches(position: i64, a: i64, b: i64) -> bool {
     }
     let diff = position - b;
     diff % a == 0 && diff / a >= 0
-}
-
-fn nth_matches<T: StyleTree>(
-    tree: &T,
-    node: NodeId,
-    nth: &NthSelector,
-    budget: &mut usize,
-) -> bool {
-    if let Some(of) = &nth.of {
-        if !list_matches(tree, node, of, budget) {
-            return false;
-        }
-    }
-    let mut sibs = element_siblings(tree, node);
-    if nth.of_type {
-        let name = &tree.name(node).local;
-        sibs.retain(|s| tree.name(*s).local == *name);
-    }
-    if let Some(of) = &nth.of {
-        let mut filtered = Vec::with_capacity(sibs.len());
-        for s in sibs {
-            if list_matches(tree, s, of, budget) {
-                filtered.push(s);
-            }
-        }
-        sibs = filtered;
-    }
-    if nth.last {
-        sibs.reverse();
-    }
-    match sibs.iter().position(|s| *s == node) {
-        Some(pos) => anb_matches((pos + 1) as i64, nth.a, nth.b),
-        None => false,
-    }
-}
-
-fn pseudo_class_matches<T: StyleTree>(tree: &T, node: NodeId, pseudo: PseudoClass) -> bool {
-    let state = tree.state(node).bits;
-    match pseudo {
-        PseudoClass::Root => is_root(tree, node),
-        PseudoClass::Hover => state.contains(StateBits::HOVER),
-        PseudoClass::Active => state.contains(StateBits::ACTIVE),
-        PseudoClass::Focus => state.contains(StateBits::FOCUS),
-        PseudoClass::Empty => is_empty(tree, node),
-        PseudoClass::Enabled => state.contains(StateBits::ENABLED),
-        PseudoClass::Disabled => state.contains(StateBits::DISABLED),
-        PseudoClass::Checked => state.contains(StateBits::CHECKED),
-        PseudoClass::Required => state.contains(StateBits::REQUIRED),
-        PseudoClass::Optional => state.contains(StateBits::OPTIONAL),
-        PseudoClass::ReadOnly => state.contains(StateBits::READ_ONLY),
-        PseudoClass::ReadWrite => state.contains(StateBits::READ_WRITE),
-        PseudoClass::PlaceholderShown => state.contains(StateBits::PLACEHOLDER_SHOWN),
-        PseudoClass::Link => state.contains(StateBits::LINK),
-        PseudoClass::AnyLink => state.contains(StateBits::ANY_LINK),
-        PseudoClass::Visited => state.contains(StateBits::VISITED),
-        PseudoClass::FocusVisible => state.contains(StateBits::FOCUS_VISIBLE),
-        PseudoClass::FocusWithin => state.contains(StateBits::FOCUS_WITHIN),
-        PseudoClass::Target => state.contains(StateBits::TARGET),
-        PseudoClass::Valid => state.contains(StateBits::VALID),
-        PseudoClass::Invalid => state.contains(StateBits::INVALID),
-        PseudoClass::UserValid => state.contains(StateBits::USER_VALID),
-        PseudoClass::UserInvalid => state.contains(StateBits::USER_INVALID),
-        PseudoClass::InRange => state.contains(StateBits::IN_RANGE),
-        PseudoClass::OutOfRange => state.contains(StateBits::OUT_OF_RANGE),
-        PseudoClass::Default => state.contains(StateBits::DEFAULT),
-        PseudoClass::Indeterminate => state.contains(StateBits::INDETERMINATE),
-        PseudoClass::Open => state.contains(StateBits::OPEN),
-        PseudoClass::Closed => state.contains(StateBits::CLOSED),
-        PseudoClass::Modal => state.contains(StateBits::MODAL),
-        PseudoClass::PopoverOpen => state.contains(StateBits::POPOVER_OPEN),
-    }
 }
 
 /// `:root` matches an element with no parent, or whose parent is not an

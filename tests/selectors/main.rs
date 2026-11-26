@@ -5,6 +5,7 @@
 
 #[path = "../common/mod.rs"]
 mod common;
+mod m3;
 mod tier1;
 
 use common::{parse_sheet, TestTree};

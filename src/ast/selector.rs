@@ -87,6 +87,11 @@ pub enum SimpleSelector {
     /// `&`, the parent selector in a nested rule. Replaced by the parent list
     /// when the nested rule is built, so it never reaches the matcher.
     Nesting,
+    /// `:has(relatives)`: an element that has a related element matching one of
+    /// the relative selectors (Selectors 4 section 4.5).
+    Has(Vec<RelativeSelector>),
+    /// `:scope`: the scope root of the enclosing `@scope`, or the root element.
+    Scope,
 }
 
 /// The `An+B` family of structural selectors.
@@ -204,4 +209,15 @@ pub enum PseudoClass {
     Modal,
     /// `:popover-open`
     PopoverOpen,
+}
+
+/// A relative selector inside `:has()`: a complex selector whose subject is
+/// related to the anchor element by `leading` (a descendant when no combinator is
+/// written).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RelativeSelector {
+    /// The relation between the anchor and the leftmost compound.
+    pub leading: Combinator,
+    /// The complex selector, without its leading combinator.
+    pub selector: ComplexSelector,
 }

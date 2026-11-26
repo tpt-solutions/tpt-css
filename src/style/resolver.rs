@@ -34,7 +34,7 @@ use crate::limits::ParseLimits;
 use crate::properties::registry::{ids, lookup, spec, PROPERTIES};
 use crate::properties::shorthand::{expand, shorthand_index, SHORTHANDS};
 use crate::properties::{parse_property_value, CssWide, PropertyId, SpecifiedValue};
-use crate::selectors::matching::matches_complex;
+use crate::selectors::matching::Matcher;
 use crate::selectors::{PseudoElement, Specificity};
 use crate::style::computed::{compute_value, ComputeContext, ComputedStyle, StyleMap};
 use crate::style::custom::{
@@ -76,6 +76,13 @@ pub(crate) struct ContainerCondition {
     pub features: Vec<MediaFeature>,
 }
 
+/// A `@scope` condition attached to a rule: the root and limit selectors.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ScopeCondition {
+    pub root: Option<SelectorList>,
+    pub limit: Option<SelectorList>,
+}
+
 /// What a declaration sets.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum DeclTarget {
@@ -110,6 +117,11 @@ pub(crate) struct CompiledRule {
     /// True if a selector depends on sibling structure, so a change to one node
     /// may affect its siblings.
     pub structural: bool,
+    /// `@scope` conditions from enclosing rules, outermost first.
+    pub scopes: Vec<ScopeCondition>,
+    /// True if a selector uses `:has()`, `:scope`, or `@scope`. Such a rule can
+    /// depend on elements outside the subject, so a change may affect any ancestor.
+    pub needs_ancestors: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -175,6 +187,7 @@ pub(crate) struct Cache {
 struct FlattenCtx {
     conditions: Vec<Vec<MediaQuery>>,
     containers: Vec<ContainerCondition>,
+    scopes: Vec<ScopeCondition>,
     layer: Option<usize>,
     layer_path: Option<String>,
 }
@@ -273,7 +286,16 @@ impl StyleResolver {
             parent: None,
             rem_base: None,
         };
-        self.last_restyled = style_tree(self, tree, start, env, &active, max_var_depth, &mut map);
+        self.last_restyled = style_tree(
+            self,
+            tree,
+            start,
+            env,
+            &active,
+            max_var_depth,
+            false,
+            &mut map,
+        );
         self.cache = Some(Cache {
             map: map.clone(),
             env: *env,
@@ -329,6 +351,39 @@ impl StyleResolver {
         })
     }
 
+    /// The size of the nearest size container above `node`, for container units.
+    fn nearest_container_size<T: StyleTree>(&self, tree: &T, node: NodeId) -> Option<(f64, f64)> {
+        let provider = self.containers.as_deref()?;
+        let mut current = tree.parent(node);
+        while let Some(ancestor) = current {
+            if let Some(info) = provider.container(ancestor) {
+                return Some((info.width, info.height));
+            }
+            current = tree.parent(ancestor);
+        }
+        None
+    }
+
+    /// True if every rule's selectors match only the subject element, and no rule
+    /// is conditional on containers or scopes. Then an element's style depends only
+    /// on itself and its parent's computed style, so restyle can stop at an
+    /// element whose style did not change.
+    pub(crate) fn subject_only(&self) -> bool {
+        self.sheets.iter().all(|sheet| {
+            sheet.rules.iter().all(|rule| {
+                !rule.structural
+                    && !rule.needs_ancestors
+                    && rule.containers.is_empty()
+                    && rule.scopes.is_empty()
+                    && rule
+                        .selectors
+                        .selectors
+                        .iter()
+                        .all(|s| s.compounds.len() == 1)
+            })
+        })
+    }
+
     /// Collects every candidate declaration for each target of `node` (spec 13).
     pub(crate) fn cascade<T: StyleTree>(
         &self,
@@ -346,13 +401,16 @@ impl StyleResolver {
                 {
                     continue;
                 }
+                let Some(scope) = scope_for(tree, node, &rule.scopes, max_steps) else {
+                    continue;
+                };
                 for (sel_idx, selector) in rule.selectors.selectors.iter().enumerate() {
                     let uses_visited = rule.visited.get(sel_idx).copied().unwrap_or(false);
                     if uses_visited && self.config.visited == VisitedPolicy::Disabled {
                         continue;
                     }
-                    let mut budget = max_steps;
-                    if !matches_complex(tree, node, selector, &mut budget) {
+                    let mut matcher = Matcher::new(tree, max_steps, scope);
+                    if !matcher.matches(node, selector) {
                         continue;
                     }
                     let cas = out
@@ -433,10 +491,18 @@ impl StyleResolver {
                         .map(selector_has_visited)
                         .collect();
                     let structural = style.selectors.selectors.iter().any(selector_is_structural);
+                    let needs_ancestors = !ctx.scopes.is_empty()
+                        || style
+                            .selectors
+                            .selectors
+                            .iter()
+                            .any(selector_needs_ancestors);
                     out.push(CompiledRule {
                         selectors: style.selectors,
                         decls,
                         conditions: ctx.conditions.clone(),
+                        scopes: ctx.scopes.clone(),
+                        needs_ancestors,
                         containers: ctx.containers.clone(),
                         layer: ctx.layer,
                         visited,
@@ -493,6 +559,14 @@ impl StyleResolver {
                         },
                     );
                 }
+                Rule::Scope(scope) => {
+                    let mut child = ctx.clone();
+                    child.scopes.push(ScopeCondition {
+                        root: scope.root,
+                        limit: scope.limit,
+                    });
+                    self.flatten(scope.rules, &child, out);
+                }
                 Rule::Keyframes(keyframes) => {
                     self.keyframes.insert(keyframes.name.clone(), keyframes);
                 }
@@ -501,6 +575,53 @@ impl StyleResolver {
             }
         }
     }
+}
+
+/// The scope root for `node` under each `@scope` condition, or `None` if the
+/// node is outside a scope. The innermost root is the result, so `:scope` refers
+/// to it. With no conditions the result is `Some(None)`: no scope.
+fn scope_for<T: StyleTree>(
+    tree: &T,
+    node: NodeId,
+    conditions: &[ScopeCondition],
+    max_steps: usize,
+) -> Option<Option<NodeId>> {
+    let mut scope = None;
+    for condition in conditions {
+        scope = Some(scope_root_for(tree, node, condition, max_steps)?);
+    }
+    Some(scope)
+}
+
+/// The nearest scope root above `node` (or `node` itself), if no limit element
+/// lies between them. Without a root selector the root element is the scope root.
+fn scope_root_for<T: StyleTree>(
+    tree: &T,
+    node: NodeId,
+    condition: &ScopeCondition,
+    max_steps: usize,
+) -> Option<NodeId> {
+    let mut current = Some(node);
+    while let Some(candidate) = current {
+        if tree.kind(candidate) == NodeKind::Element {
+            let is_root = match &condition.root {
+                Some(list) => Matcher::new(tree, max_steps, None).matches_any(candidate, list),
+                None => tree
+                    .parent(candidate)
+                    .map_or(true, |p| tree.kind(p) != NodeKind::Element),
+            };
+            if is_root {
+                return Some(candidate);
+            }
+            if let Some(limit) = &condition.limit {
+                if Matcher::new(tree, max_steps, None).matches_any(candidate, limit) {
+                    return None;
+                }
+            }
+        }
+        current = tree.parent(candidate);
+    }
+    None
 }
 
 /// The name of a layer nested under `parent`.
@@ -547,6 +668,20 @@ fn selector_has_visited(selector: &ComplexSelector) -> bool {
     })
 }
 
+/// True if a selector depends on elements outside its subject: `:has()` and
+/// `:scope` do.
+fn selector_needs_ancestors(selector: &ComplexSelector) -> bool {
+    selector.compounds.iter().any(|compound| {
+        compound.simple.iter().any(|simple| match simple {
+            SimpleSelector::Has(_) | SimpleSelector::Scope => true,
+            SimpleSelector::Not(list) | SimpleSelector::Is(list) | SimpleSelector::Where(list) => {
+                list.selectors.iter().any(selector_needs_ancestors)
+            }
+            _ => false,
+        })
+    })
+}
+
 /// True if a selector depends on sibling structure.
 pub(crate) fn selector_is_structural(selector: &ComplexSelector) -> bool {
     let sibling_combinator = selector
@@ -569,6 +704,9 @@ pub(crate) fn selector_is_structural(selector: &ComplexSelector) -> bool {
 
 /// Resolves the subtree rooted at `start.node` into `map`. Returns the number of
 /// elements styled.
+// Every argument is needed by the traversal: the tree, the start frame, the
+// environment and active rules, the var depth, the restyle cutoff flag, and the map.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn style_tree<T: StyleTree>(
     resolver: &StyleResolver,
     tree: &T,
@@ -576,6 +714,7 @@ pub(crate) fn style_tree<T: StyleTree>(
     env: &Environment,
     active: &[Vec<bool>],
     max_var_depth: usize,
+    cutoff: bool,
     map: &mut StyleMap,
 ) -> usize {
     let mut styled = 0;
@@ -584,6 +723,7 @@ pub(crate) fn style_tree<T: StyleTree>(
         match tree.kind(frame.node) {
             NodeKind::Element => {
                 let root_fs = frame.rem_base.unwrap_or(env.root_font_size);
+                let container = resolver.nearest_container_size(tree, frame.node);
                 let mut targets = resolver.cascade(tree, frame.node, active);
                 let element_cas = targets.remove(&None).unwrap_or_else(Cascaded::new);
                 let style = compute_style(
@@ -593,6 +733,7 @@ pub(crate) fn style_tree<T: StyleTree>(
                     env,
                     max_var_depth,
                     &resolver.registered,
+                    container,
                 );
 
                 map.clear_pseudo(frame.node);
@@ -605,6 +746,7 @@ pub(crate) fn style_tree<T: StyleTree>(
                             env,
                             max_var_depth,
                             &resolver.registered,
+                            container,
                         );
                         if is_generated(&pseudo, &pstyle) {
                             map.insert_pseudo(frame.node, pseudo, pstyle);
@@ -612,13 +754,20 @@ pub(crate) fn style_tree<T: StyleTree>(
                     }
                 }
 
-                let child_rem = Some(frame.rem_base.unwrap_or(style.font_size()));
-                for &child in tree.children(frame.node).iter().rev() {
-                    stack.push(Frame {
-                        node: child,
-                        parent: Some(style.clone()),
-                        rem_base: child_rem,
-                    });
+                // Equality cutoff (restyle only): when the element and its pseudo-elements
+                // keep their old values, nothing below it can have changed, so the
+                // children are skipped. This only holds when no rule depends on
+                // anything but its own subject (see `StyleResolver::subject_only`).
+                let unchanged = cutoff && map.get(frame.node) == Some(&style);
+                if !unchanged {
+                    let child_rem = Some(frame.rem_base.unwrap_or(style.font_size()));
+                    for &child in tree.children(frame.node).iter().rev() {
+                        stack.push(Frame {
+                            node: child,
+                            parent: Some(style.clone()),
+                            rem_base: child_rem,
+                        });
+                    }
                 }
                 map.insert(frame.node, style);
                 styled += 1;
@@ -673,6 +822,7 @@ fn compute_style(
     env: &Environment,
     max_var_depth: usize,
     registered: &BTreeMap<String, RegisteredProperty>,
+    container: Option<(f64, f64)>,
 ) -> ComputedStyle {
     let declared: BTreeMap<String, SpecifiedValue> = cas
         .custom
@@ -699,6 +849,7 @@ fn compute_style(
         viewport_width: env.viewport.width,
         viewport_height: env.viewport.height,
         dark: env.media.prefers_dark,
+        container,
     };
 
     let mut values: Vec<Value> = PROPERTIES.iter().map(|p| p.initial.to_value()).collect();

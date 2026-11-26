@@ -49,7 +49,14 @@ impl StyleResolver {
                     .sheets
                     .iter()
                     .any(|s| s.rules.iter().any(|r| r.structural));
-                if structural {
+                if self
+                    .sheets
+                    .iter()
+                    .any(|s| s.rules.iter().any(|r| r.needs_ancestors))
+                {
+                    // :has() and :scope can depend on any ancestor, so restyle everything.
+                    self.full_dirty = true;
+                } else if structural {
                     if let Some(parent) = tree.parent(node) {
                         self.dirty.insert(parent);
                     }
@@ -84,6 +91,7 @@ impl StyleResolver {
         let active = self.active_rules(env);
         let max_var_depth = self.config.limits.max_var_depth;
         let dirty: Vec<NodeId> = std::mem::take(&mut self.dirty).into_iter().collect();
+        let cutoff = self.subject_only();
 
         let mut styled = 0;
         for node in dirty {
@@ -96,7 +104,16 @@ impl StyleResolver {
                 parent: parent_style,
                 rem_base: rem_base_for(tree, node, &map, env),
             };
-            styled += style_tree(self, tree, start, env, &active, max_var_depth, &mut map);
+            styled += style_tree(
+                self,
+                tree,
+                start,
+                env,
+                &active,
+                max_var_depth,
+                cutoff,
+                &mut map,
+            );
         }
 
         self.last_restyled = styled;

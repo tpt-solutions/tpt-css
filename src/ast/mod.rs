@@ -14,10 +14,10 @@ pub use declaration::{Declaration, DeclarationBlock};
 pub use media::{Comparison, MediaFeature, MediaQuery, MediaType, PointerKind};
 pub use rule::{
     ContainerRule, FontFaceRule, Keyframe, KeyframesRule, LayerRule, MediaRule, PropertyRule, Rule,
-    StyleRule, SupportsRule, UnknownAtRule,
+    ScopeRule, StyleRule, SupportsRule, UnknownAtRule,
 };
 pub use selector::{
     AttributeMatcher, AttributeOperator, AttributeSelector, Combinator, ComplexSelector,
-    CompoundSelector, NthSelector, PseudoClass, SelectorList, SimpleSelector,
+    CompoundSelector, NthSelector, PseudoClass, RelativeSelector, SelectorList, SimpleSelector,
 };
 pub use stylesheet::Stylesheet;

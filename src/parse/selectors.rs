@@ -13,7 +13,7 @@ use super::diagnostics::{Diagnostic, DiagnosticCode};
 use super::split_on;
 use crate::ast::selector::{
     AttributeMatcher, AttributeOperator, AttributeSelector, Combinator, ComplexSelector,
-    CompoundSelector, NthSelector, PseudoClass, SelectorList, SimpleSelector,
+    CompoundSelector, NthSelector, PseudoClass, RelativeSelector, SelectorList, SimpleSelector,
 };
 use crate::limits::ParseLimits;
 use crate::selectors::pseudo::PseudoElement;
@@ -452,6 +452,7 @@ fn pseudo_class(name: &str, span: Span) -> Result<Vec<SimpleSelector>, Diagnosti
         "closed" => one(PseudoClass::Closed),
         "modal" => one(PseudoClass::Modal),
         "popover-open" => one(PseudoClass::PopoverOpen),
+        "scope" => Ok(vec![SimpleSelector::Scope]),
         "first-child" => Ok(vec![nth_plain(false, false)]),
         "last-child" => Ok(vec![nth_plain(true, false)]),
         "only-child" => Ok(vec![nth_plain(false, false), nth_plain(true, false)]),
@@ -492,6 +493,7 @@ fn functional_pseudo(
                 _ => SimpleSelector::Where(list),
             })
         }
+        "has" => parse_has(f, limits, depth),
         "lang" => {
             let args = trim_whitespace(&f.value);
             match args {
@@ -718,4 +720,48 @@ pub(crate) fn span_of(values: &[ComponentValue]) -> Span {
         (Some(a), Some(b)) => a.span().join(b.span()),
         _ => Span::default(),
     }
+}
+
+/// `:has(relative-selector-list)`. Each entry may start with a combinator, which
+/// relates its subject to the anchor (a descendant when none is written).
+fn parse_has(
+    f: &Function,
+    limits: &ParseLimits,
+    depth: usize,
+) -> Result<SimpleSelector, Diagnostic> {
+    if depth + 1 > limits.max_nesting_depth {
+        return Err(invalid(f.span, ":has() nesting limit exceeded"));
+    }
+    let mut relatives = Vec::new();
+    for part in split_on(&f.value, |v| v.is_token(&TokenKind::Comma)) {
+        let mut part = trim_whitespace(part);
+        let leading = match part.first() {
+            Some(ComponentValue::Token(t)) => match t.kind {
+                TokenKind::Delim('>') => Some(Combinator::Child),
+                TokenKind::Delim('+') => Some(Combinator::NextSibling),
+                TokenKind::Delim('~') => Some(Combinator::SubsequentSibling),
+                _ => None,
+            },
+            _ => None,
+        };
+        let leading = match leading {
+            Some(c) => {
+                part = trim_whitespace(&part[1..]);
+                c
+            }
+            None => Combinator::Descendant,
+        };
+        if part.is_empty() {
+            return Err(invalid(f.span, ":has() needs a selector"));
+        }
+        let selector = parse_complex(part, limits, depth + 1)?;
+        if selector.pseudo_element.is_some() {
+            return Err(invalid(f.span, "pseudo-elements are not allowed in :has()"));
+        }
+        relatives.push(RelativeSelector { leading, selector });
+    }
+    if relatives.is_empty() {
+        return Err(invalid(f.span, ":has() needs a selector"));
+    }
+    Ok(SimpleSelector::Has(relatives))
 }

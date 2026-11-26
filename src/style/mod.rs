@@ -10,7 +10,9 @@
 
 pub mod computed;
 pub mod custom;
+pub mod inspect;
 pub mod invalidation;
+pub mod keyframes;
 pub mod resolver;
 
 pub use computed::{ComputedStyle, StyleMap};

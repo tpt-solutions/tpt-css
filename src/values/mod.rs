@@ -49,6 +49,18 @@ pub enum LengthUnit {
     Pt,
     /// `pc`
     Pc,
+    /// `cqw`: 1% of the nearest container's width (the viewport if none).
+    Cqw,
+    /// `cqh`: 1% of the nearest container's height.
+    Cqh,
+    /// `cqi`: 1% of the container's inline size (its width).
+    Cqi,
+    /// `cqb`: 1% of the container's block size (its height).
+    Cqb,
+    /// `cqmin`: the smaller of `cqi` and `cqb`.
+    Cqmin,
+    /// `cqmax`: the larger of `cqi` and `cqb`.
+    Cqmax,
 }
 
 /// A typed property value, used for both specified and computed values.

@@ -1,26 +1,86 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Copyright (c) 2026 TPT Solutions
 
-//! Math functions: `calc()`, `min()`, `max()`, `clamp()` (spec 14.4).
+//! Math functions (spec 14.4): `calc()`, `min()`, `max()`, `clamp()`, and the
+//! numeric functions `round()`, `mod()`, `rem()`, `abs()`, `sign()`, `hypot()`,
+//! `sqrt()`, `pow()`, `log()`, `exp()`, the trigonometric functions, and
+//! `atan2()`.
 //!
 //! Parsing builds a [`CalcNode`] tree with units kept. Every node has a kind:
-//! a plain `Number`, or a `Dimension` (a length or percentage). Operators are
-//! type-checked when the tree is built, so an expression such as `10px + 2`
-//! is invalid and the declaration is dropped.
+//! a plain `Number`, or a `Dimension` (a length or percentage). Operators and
+//! function arguments are type-checked when the tree is built, so an expression
+//! such as `10px + 2` is invalid and the declaration is dropped.
 //!
 //! Simplification runs at computed-value time (`simplify`). Lengths become px,
 //! and linear forms collapse to `Linear { px, percent }`. Percentages stay
-//! symbolic for layout, except in `font-size`, where the parent's size is
-//! known. Expressions that mix px and percent inside `min()`, `max()`, or
-//! `clamp()` stay as trees for layout to resolve (spec 4.4).
+//! symbolic for layout, except in `font-size`, where the parent's size is known.
+//! Expressions that mix px and percent inside `min()`, `max()`, `clamp()`, or a
+//! rounding function stay as trees for layout to resolve (spec 4.4).
+//!
+//! Angles and times are not parsed as values, so the trigonometric functions
+//! take plain numbers (radians), as CSS does for unitless arguments.
 
 use super::serialize::format_number;
 use super::LengthUnit;
 use crate::syntax::{ComponentValue, TokenKind};
 
-/// Maximum nesting of math functions and parentheses accepted by the parser.
-/// Not yet configurable through `ParseLimits`.
+/// The default nesting limit for math functions and parentheses. Parsers use the
+/// `max_calc_depth` of the `ParseLimits` they are given.
 pub const DEFAULT_CALC_DEPTH: usize = 32;
+
+/// The rounding strategy of `round()` (spec 14.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoundStrategy {
+    /// `nearest`, the default. Ties round toward positive infinity.
+    Nearest,
+    /// `up`: toward positive infinity.
+    Up,
+    /// `down`: toward negative infinity.
+    Down,
+    /// `to-zero`: toward zero.
+    ToZero,
+}
+
+/// A numeric function of `calc()` (spec 14.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MathFn {
+    /// `round(strategy?, value, step?)`
+    Round(RoundStrategy),
+    /// `mod(a, b)`: the result has the sign of `b`.
+    Mod,
+    /// `rem(a, b)`: the result has the sign of `a`.
+    Rem,
+    /// `abs(x)`
+    Abs,
+    /// `sign(x)`
+    Sign,
+    /// `hypot(...)`
+    Hypot,
+    /// `sqrt(x)`
+    Sqrt,
+    /// `pow(x, y)`
+    Pow,
+    /// `log(x, base?)`
+    Log,
+    /// `exp(x)`
+    Exp,
+    /// `sin(x)`, radians
+    Sin,
+    /// `cos(x)`, radians
+    Cos,
+    /// `tan(x)`, radians
+    Tan,
+    /// `asin(x)`
+    Asin,
+    /// `acos(x)`
+    Acos,
+    /// `atan(x)`
+    Atan,
+    /// `progress(v, from, to)`: where `v` lies between `from` and `to`, as a number.
+    Progress,
+    /// `atan2(y, x)`
+    Atan2,
+}
 
 /// A node of a math expression tree.
 #[derive(Debug, Clone, PartialEq)]
@@ -57,6 +117,8 @@ pub enum CalcNode {
     Max(Vec<CalcNode>),
     /// `clamp(min, value, max)`
     Clamp(Box<CalcNode>, Box<CalcNode>, Box<CalcNode>),
+    /// A numeric function applied to its arguments.
+    Func(MathFn, Vec<CalcNode>),
 }
 
 /// The kind of a math expression.
@@ -100,7 +162,23 @@ impl CalcNode {
                 let k = a.kind()?;
                 (b.kind()? == k && c.kind()? == k).then_some(k)
             }
+            CalcNode::Func(f, args) => func_kind(*f, args),
         }
+    }
+}
+
+/// The kind of a numeric function applied to `args`, or `None` if the arguments
+/// do not fit the function.
+fn func_kind(f: MathFn, args: &[CalcNode]) -> Option<CalcKind> {
+    use CalcKind::Number;
+    let kinds: Vec<CalcKind> = args.iter().map(|a| a.kind()).collect::<Option<_>>()?;
+    let first = *kinds.first()?;
+    match f {
+        MathFn::Round(_) | MathFn::Mod | MathFn::Rem | MathFn::Abs | MathFn::Hypot => {
+            kinds.iter().all(|k| *k == first).then_some(first)
+        }
+        MathFn::Sign | MathFn::Progress => Some(Number),
+        _ => kinds.iter().all(|k| *k == Number).then_some(Number),
     }
 }
 
@@ -120,6 +198,12 @@ pub(crate) fn unit_from_name(name: &str) -> Option<LengthUnit> {
         "in" => Some(LengthUnit::In),
         "pt" => Some(LengthUnit::Pt),
         "pc" => Some(LengthUnit::Pc),
+        "cqw" => Some(LengthUnit::Cqw),
+        "cqh" => Some(LengthUnit::Cqh),
+        "cqi" => Some(LengthUnit::Cqi),
+        "cqb" => Some(LengthUnit::Cqb),
+        "cqmin" => Some(LengthUnit::Cqmin),
+        "cqmax" => Some(LengthUnit::Cqmax),
         _ => None,
     }
 }
@@ -140,32 +224,52 @@ pub fn unit_name(unit: LengthUnit) -> &'static str {
         LengthUnit::In => "in",
         LengthUnit::Pt => "pt",
         LengthUnit::Pc => "pc",
+        LengthUnit::Cqw => "cqw",
+        LengthUnit::Cqh => "cqh",
+        LengthUnit::Cqi => "cqi",
+        LengthUnit::Cqb => "cqb",
+        LengthUnit::Cqmin => "cqmin",
+        LengthUnit::Cqmax => "cqmax",
     }
 }
 
-/// Parses a math function (`calc`, `min`, `max`, `clamp`) whose result must be
-/// a length or percentage. Returns `None` for anything invalid, for an unknown
-/// function, or for a number-typed result.
+/// Parses a math function (`calc`, `min`, `max`, `clamp`, or a numeric function)
+/// whose result must be a length or percentage, with the default depth limit.
 pub fn parse_math_function(name: &str, args: &[ComponentValue]) -> Option<CalcNode> {
-    let node = parse_function(name, args, 0)?;
+    parse_math_function_limited(name, args, DEFAULT_CALC_DEPTH)
+}
+
+/// Like [`parse_math_function`], with an explicit nesting limit (`max_calc_depth`).
+pub fn parse_math_function_limited(
+    name: &str,
+    args: &[ComponentValue],
+    max_depth: usize,
+) -> Option<CalcNode> {
+    let node = parse_function(name, args, 0, max_depth)?;
     (node.kind()? == CalcKind::Dimension).then_some(node)
 }
 
-fn parse_function(name: &str, args: &[ComponentValue], depth: usize) -> Option<CalcNode> {
-    if depth > DEFAULT_CALC_DEPTH {
+fn parse_function(
+    name: &str,
+    args: &[ComponentValue],
+    depth: usize,
+    max: usize,
+) -> Option<CalcNode> {
+    if depth > max {
         return None;
     }
-    match name.to_ascii_lowercase().as_str() {
-        "calc" => parse_expression(args, depth + 1),
+    let lower = name.to_ascii_lowercase();
+    match lower.as_str() {
+        "calc" => parse_expression(args, depth + 1, max),
         "min" | "max" => {
             let mut parts = Vec::new();
             for part in split_commas(args) {
-                parts.push(parse_expression(part, depth + 1)?);
+                parts.push(parse_expression(part, depth + 1, max)?);
             }
             if parts.is_empty() {
                 return None;
             }
-            Some(if name.eq_ignore_ascii_case("min") {
+            Some(if lower == "min" {
                 CalcNode::Min(parts)
             } else {
                 CalcNode::Max(parts)
@@ -176,13 +280,110 @@ fn parse_function(name: &str, args: &[ComponentValue], depth: usize) -> Option<C
             if parts.len() != 3 {
                 return None;
             }
-            let lo = parse_expression(parts[0], depth + 1)?;
-            let mid = parse_expression(parts[1], depth + 1)?;
-            let hi = parse_expression(parts[2], depth + 1)?;
+            let lo = parse_expression(parts[0], depth + 1, max)?;
+            let mid = parse_expression(parts[1], depth + 1, max)?;
+            let hi = parse_expression(parts[2], depth + 1, max)?;
             Some(CalcNode::Clamp(Box::new(lo), Box::new(mid), Box::new(hi)))
+        }
+        "round" => {
+            let mut parts = split_commas(args);
+            let strategy = match parts.first().map(|p| trim(p)) {
+                Some([ComponentValue::Token(t)]) if parts.len() == 3 => match &t.kind {
+                    TokenKind::Ident(s) => match s.to_ascii_lowercase().as_str() {
+                        "nearest" => Some(RoundStrategy::Nearest),
+                        "up" => Some(RoundStrategy::Up),
+                        "down" => Some(RoundStrategy::Down),
+                        "to-zero" => Some(RoundStrategy::ToZero),
+                        _ => return None,
+                    },
+                    _ => None,
+                },
+                _ => None,
+            };
+            if strategy.is_some() {
+                parts.remove(0);
+            }
+            if parts.is_empty() || parts.len() > 2 {
+                return None;
+            }
+            let nodes = parse_parts(&parts, depth, max)?;
+            func(
+                MathFn::Round(strategy.unwrap_or(RoundStrategy::Nearest)),
+                nodes,
+            )
+        }
+        "mod" | "rem" | "pow" | "atan2" => {
+            let parts = split_commas(args);
+            if parts.len() != 2 {
+                return None;
+            }
+            let f = match lower.as_str() {
+                "mod" => MathFn::Mod,
+                "rem" => MathFn::Rem,
+                "pow" => MathFn::Pow,
+                _ => MathFn::Atan2,
+            };
+            func(f, parse_parts(&parts, depth, max)?)
+        }
+        "abs" | "sign" | "sqrt" | "exp" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" => {
+            let parts = split_commas(args);
+            if parts.len() != 1 {
+                return None;
+            }
+            let f = match lower.as_str() {
+                "abs" => MathFn::Abs,
+                "sign" => MathFn::Sign,
+                "sqrt" => MathFn::Sqrt,
+                "exp" => MathFn::Exp,
+                "sin" => MathFn::Sin,
+                "cos" => MathFn::Cos,
+                "tan" => MathFn::Tan,
+                "asin" => MathFn::Asin,
+                "acos" => MathFn::Acos,
+                _ => MathFn::Atan,
+            };
+            func(f, parse_parts(&parts, depth, max)?)
+        }
+        "progress" => {
+            let parts = split_commas(args);
+            if parts.len() != 3 {
+                return None;
+            }
+            func(MathFn::Progress, parse_parts(&parts, depth, max)?)
+        }
+        "log" => {
+            let parts = split_commas(args);
+            if parts.is_empty() || parts.len() > 2 {
+                return None;
+            }
+            func(MathFn::Log, parse_parts(&parts, depth, max)?)
+        }
+        "hypot" => {
+            let parts = split_commas(args);
+            if parts.is_empty() {
+                return None;
+            }
+            func(MathFn::Hypot, parse_parts(&parts, depth, max)?)
         }
         _ => None,
     }
+}
+
+/// Builds a numeric function node if its arguments type-check.
+fn func(f: MathFn, args: Vec<CalcNode>) -> Option<CalcNode> {
+    let node = CalcNode::Func(f, args);
+    node.kind().map(|_| node)
+}
+
+fn trim(values: &[ComponentValue]) -> &[ComponentValue] {
+    crate::syntax::trim_whitespace(values)
+}
+
+fn parse_parts(parts: &[&[ComponentValue]], depth: usize, max: usize) -> Option<Vec<CalcNode>> {
+    parts
+        .iter()
+        .map(|p| parse_expression(p, depth + 1, max))
+        .collect()
 }
 
 /// Splits argument values at top-level commas.
@@ -191,8 +392,8 @@ fn split_commas(args: &[ComponentValue]) -> Vec<&[ComponentValue]> {
 }
 
 /// Parses a whole expression (all non-whitespace items must be consumed).
-fn parse_expression(values: &[ComponentValue], depth: usize) -> Option<CalcNode> {
-    if depth > DEFAULT_CALC_DEPTH {
+fn parse_expression(values: &[ComponentValue], depth: usize, max: usize) -> Option<CalcNode> {
+    if depth > max {
         return None;
     }
     let items: Vec<&ComponentValue> = values.iter().filter(|v| !v.is_whitespace()).collect();
@@ -200,6 +401,7 @@ fn parse_expression(values: &[ComponentValue], depth: usize) -> Option<CalcNode>
         items,
         pos: 0,
         depth,
+        max,
     };
     let node = parser.sum()?;
     (parser.pos == parser.items.len()).then_some(node)
@@ -209,6 +411,7 @@ struct Parser<'a> {
     items: Vec<&'a ComponentValue>,
     pos: usize,
     depth: usize,
+    max: usize,
 }
 
 impl Parser<'_> {
@@ -273,9 +476,11 @@ impl Parser<'_> {
                 }),
                 _ => None,
             },
-            ComponentValue::Function(f) => parse_function(&f.name, &f.value, self.depth + 1),
+            ComponentValue::Function(f) => {
+                parse_function(&f.name, &f.value, self.depth + 1, self.max)
+            }
             ComponentValue::Block(b) if b.kind == crate::syntax::BlockKind::Paren => {
-                parse_expression(&b.value, self.depth + 1)
+                parse_expression(&b.value, self.depth + 1, self.max)
             }
             _ => None,
         }
@@ -295,6 +500,7 @@ pub type ToPx<'a> = &'a dyn Fn(f64, LengthUnit) -> f64;
 /// `percent_base` is `Some(px)` when percentages resolve now (font-size, whose
 /// percentage refers to the parent's size). Otherwise percentages stay symbolic.
 pub fn simplify(node: &CalcNode, to_px: ToPx<'_>, percent_base: Option<f64>) -> CalcNode {
+    let s = |n: &CalcNode| simplify(n, to_px, percent_base);
     match node {
         CalcNode::Number(v) => CalcNode::Number(*v),
         CalcNode::Length { value, unit } => CalcNode::Linear {
@@ -316,10 +522,7 @@ pub fn simplify(node: &CalcNode, to_px: ToPx<'_>, percent_base: Option<f64>) -> 
             percent: *percent,
         },
         CalcNode::Add(a, b) => {
-            let (a, b) = (
-                simplify(a, to_px, percent_base),
-                simplify(b, to_px, percent_base),
-            );
+            let (a, b) = (s(a), s(b));
             match (as_linear(&a), as_linear(&b), as_number(&a), as_number(&b)) {
                 (Some((pa, qa)), Some((pb, qb)), _, _) => CalcNode::Linear {
                     px: pa + pb,
@@ -330,10 +533,7 @@ pub fn simplify(node: &CalcNode, to_px: ToPx<'_>, percent_base: Option<f64>) -> 
             }
         }
         CalcNode::Sub(a, b) => {
-            let (a, b) = (
-                simplify(a, to_px, percent_base),
-                simplify(b, to_px, percent_base),
-            );
+            let (a, b) = (s(a), s(b));
             match (as_linear(&a), as_linear(&b), as_number(&a), as_number(&b)) {
                 (Some((pa, qa)), Some((pb, qb)), _, _) => CalcNode::Linear {
                     px: pa - pb,
@@ -344,10 +544,7 @@ pub fn simplify(node: &CalcNode, to_px: ToPx<'_>, percent_base: Option<f64>) -> 
             }
         }
         CalcNode::Mul(a, b) => {
-            let (a, b) = (
-                simplify(a, to_px, percent_base),
-                simplify(b, to_px, percent_base),
-            );
+            let (a, b) = (s(a), s(b));
             match (as_linear(&a), as_linear(&b), as_number(&a), as_number(&b)) {
                 (_, _, Some(x), Some(y)) => CalcNode::Number(x * y),
                 (Some((p, q)), _, _, Some(k)) | (_, Some((p, q)), Some(k), _) => CalcNode::Linear {
@@ -358,10 +555,7 @@ pub fn simplify(node: &CalcNode, to_px: ToPx<'_>, percent_base: Option<f64>) -> 
             }
         }
         CalcNode::Div(a, b) => {
-            let (a, b) = (
-                simplify(a, to_px, percent_base),
-                simplify(b, to_px, percent_base),
-            );
+            let (a, b) = (s(a), s(b));
             match (as_linear(&a), as_number(&a), as_number(&b)) {
                 (_, Some(x), Some(y)) if y != 0.0 => CalcNode::Number(x / y),
                 (Some((p, q)), _, Some(k)) if k != 0.0 => CalcNode::Linear {
@@ -372,23 +566,17 @@ pub fn simplify(node: &CalcNode, to_px: ToPx<'_>, percent_base: Option<f64>) -> 
             }
         }
         CalcNode::Min(args) => {
-            let args: Vec<CalcNode> = args
-                .iter()
-                .map(|a| simplify(a, to_px, percent_base))
-                .collect();
+            let args: Vec<CalcNode> = args.iter().map(s).collect();
             fold_extremum(args, f64::min, CalcNode::Min)
         }
         CalcNode::Max(args) => {
-            let args: Vec<CalcNode> = args
-                .iter()
-                .map(|a| simplify(a, to_px, percent_base))
-                .collect();
+            let args: Vec<CalcNode> = args.iter().map(s).collect();
             fold_extremum(args, f64::max, CalcNode::Max)
         }
         CalcNode::Clamp(lo, mid, hi) => {
-            let lo = simplify(lo, to_px, percent_base);
-            let mid = simplify(mid, to_px, percent_base);
-            let hi = simplify(hi, to_px, percent_base);
+            let lo = s(lo);
+            let mid = s(mid);
+            let hi = s(hi);
             let all: Vec<CalcNode> = vec![lo.clone(), mid.clone(), hi.clone()];
             // clamp(lo, val, hi) = max(lo, min(val, hi)); the lower bound wins.
             match all.iter().map(as_number).collect::<Option<Vec<f64>>>() {
@@ -402,7 +590,93 @@ pub fn simplify(node: &CalcNode, to_px: ToPx<'_>, percent_base: Option<f64>) -> 
                 },
             }
         }
+        CalcNode::Func(f, args) => {
+            let args: Vec<CalcNode> = args.iter().map(s).collect();
+            fold_func(*f, args)
+        }
     }
+}
+
+/// Evaluates a numeric function on plain scalars. `None` means the result is
+/// undefined (for example a division by zero or a square root of a negative).
+fn eval_scalar(f: MathFn, v: &[f64]) -> Option<f64> {
+    let x = *v.first()?;
+    match f {
+        MathFn::Round(strategy) => {
+            let step = v.get(1).copied().unwrap_or(1.0);
+            if step == 0.0 {
+                return None;
+            }
+            let q = x / step;
+            let r = match strategy {
+                RoundStrategy::Nearest => (q + 0.5).floor(),
+                RoundStrategy::Up => q.ceil(),
+                RoundStrategy::Down => q.floor(),
+                RoundStrategy::ToZero => q.trunc(),
+            };
+            Some(r * step)
+        }
+        MathFn::Mod => {
+            let b = *v.get(1)?;
+            (b != 0.0).then(|| x - b * (x / b).floor())
+        }
+        MathFn::Rem => {
+            let b = *v.get(1)?;
+            (b != 0.0).then(|| x - b * (x / b).trunc())
+        }
+        MathFn::Abs => Some(x.abs()),
+        MathFn::Sign => Some(if x == 0.0 { 0.0 } else { x.signum() }),
+        MathFn::Hypot => Some(v.iter().map(|a| a * a).sum::<f64>().sqrt()),
+        MathFn::Sqrt => (x >= 0.0).then(|| x.sqrt()),
+        MathFn::Pow => Some(x.powf(*v.get(1)?)),
+        MathFn::Log => match v.get(1) {
+            Some(base) => Some(x.ln() / base.ln()),
+            None => Some(x.ln()),
+        },
+        MathFn::Exp => Some(x.exp()),
+        MathFn::Sin => Some(x.sin()),
+        MathFn::Cos => Some(x.cos()),
+        MathFn::Tan => Some(x.tan()),
+        MathFn::Asin => (-1.0..=1.0).contains(&x).then(|| x.asin()),
+        MathFn::Acos => (-1.0..=1.0).contains(&x).then(|| x.acos()),
+        MathFn::Atan => Some(x.atan()),
+        MathFn::Atan2 => Some(x.atan2(*v.get(1)?)),
+        MathFn::Progress => {
+            let (from, to) = (*v.get(1)?, *v.get(2)?);
+            (from != to).then(|| (x - from) / (to - from))
+        }
+    }
+}
+
+/// Folds a numeric function: constant arguments give a number, and px-only
+/// length arguments give px (for the functions that return a length). Other
+/// cases stay as a tree.
+fn fold_func(f: MathFn, args: Vec<CalcNode>) -> CalcNode {
+    if let Some(nums) = args.iter().map(as_number).collect::<Option<Vec<f64>>>() {
+        return match eval_scalar(f, &nums) {
+            Some(v) => CalcNode::Number(v),
+            None => CalcNode::Func(f, args),
+        };
+    }
+    let lins: Option<Vec<(f64, f64)>> = args.iter().map(as_linear).collect();
+    if let Some(lins) = lins {
+        if lins.iter().all(|(_, q)| *q == 0.0) {
+            let px: Vec<f64> = lins.iter().map(|(p, _)| *p).collect();
+            if let Some(v) = eval_scalar(f, &px) {
+                return match f {
+                    MathFn::Sign | MathFn::Progress => CalcNode::Number(v),
+                    MathFn::Round(_) | MathFn::Mod | MathFn::Rem | MathFn::Abs | MathFn::Hypot => {
+                        CalcNode::Linear {
+                            px: v,
+                            percent: 0.0,
+                        }
+                    }
+                    _ => CalcNode::Func(f, args),
+                };
+            }
+        }
+    }
+    CalcNode::Func(f, args)
 }
 
 /// `min()` or `max()` over simplified arguments: folds numbers, and px-only
@@ -447,6 +721,30 @@ fn as_linear(node: &CalcNode) -> Option<(f64, f64)> {
     }
 }
 
+/// The CSS name of a numeric function.
+fn func_name(f: MathFn) -> &'static str {
+    match f {
+        MathFn::Round(_) => "round",
+        MathFn::Mod => "mod",
+        MathFn::Rem => "rem",
+        MathFn::Abs => "abs",
+        MathFn::Sign => "sign",
+        MathFn::Hypot => "hypot",
+        MathFn::Sqrt => "sqrt",
+        MathFn::Pow => "pow",
+        MathFn::Log => "log",
+        MathFn::Exp => "exp",
+        MathFn::Sin => "sin",
+        MathFn::Cos => "cos",
+        MathFn::Tan => "tan",
+        MathFn::Asin => "asin",
+        MathFn::Acos => "acos",
+        MathFn::Atan => "atan",
+        MathFn::Atan2 => "atan2",
+        MathFn::Progress => "progress",
+    }
+}
+
 /// Serializes a computed or specified math node in CSS form.
 pub fn serialize(node: &CalcNode) -> String {
     match node {
@@ -476,6 +774,13 @@ pub fn serialize(node: &CalcNode) -> String {
             serialize(b),
             serialize(c)
         ),
+        CalcNode::Func(f, args) => match f {
+            MathFn::Round(RoundStrategy::Nearest) => format!("round({})", join(args)),
+            MathFn::Round(RoundStrategy::Up) => format!("round(up, {})", join(args)),
+            MathFn::Round(RoundStrategy::Down) => format!("round(down, {})", join(args)),
+            MathFn::Round(RoundStrategy::ToZero) => format!("round(to-zero, {})", join(args)),
+            other => format!("{}({})", func_name(*other), join(args)),
+        },
     }
 }
 

@@ -23,6 +23,8 @@ pub enum Rule {
     Supports(SupportsRule),
     /// `@container name? (features) { rules }` (spec 16.5).
     Container(ContainerRule),
+    /// `@scope (root)? (to (limit))? { rules }` (CSS Cascade 6).
+    Scope(ScopeRule),
     /// `@property --name { ... }` (spec 15.1, registered custom properties).
     Property(PropertyRule),
     /// `@keyframes name { ... }`
@@ -148,6 +150,20 @@ pub struct UnknownAtRule {
     pub prelude: Vec<ComponentValue>,
     /// Block component values, if the rule had a `{}` block.
     pub block: Option<Vec<ComponentValue>>,
+    /// Span of the whole rule.
+    pub span: Span,
+}
+
+/// An `@scope` rule (CSS Cascade 6). The rules apply to elements under a scope
+/// root, excluding anything under the limit.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScopeRule {
+    /// The scope root selector, or `None` for the root element.
+    pub root: Option<SelectorList>,
+    /// The scope limit selector, from `to (...)`.
+    pub limit: Option<SelectorList>,
+    /// Rules inside the block.
+    pub rules: Vec<Rule>,
     /// Span of the whole rule.
     pub span: Span,
 }

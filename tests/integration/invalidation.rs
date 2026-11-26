@@ -176,3 +176,54 @@ fn a_restyle_with_nothing_dirty_reuses_the_previous_result() {
     assert_eq!(first, again);
     assert_eq!(r.last_restyle_count(), 0);
 }
+
+#[test]
+fn an_unchanged_style_stops_the_restyle_when_rules_are_subject_only() {
+    let css = "div { margin-left: 1px }";
+    let env = Environment::default();
+    let (mut t, divs) = big_tree();
+    let mut r = resolver_for(css);
+    let _ = r.resolve(&t, &env);
+
+    // The class is not used by any rule, so the div's style is unchanged and its
+    // descendants need no restyle.
+    t.add_class(divs[4], "unrelated");
+    r.invalidate(&t, StyleChange::AttributeChanged(divs[4]));
+    let map = r.restyle(&t, &env);
+    assert_eq!(
+        r.last_restyle_count(),
+        1,
+        "only the changed element is restyled"
+    );
+    assert_eq!(map, full(css, &t, &env));
+}
+
+#[test]
+fn a_changed_style_propagates_to_the_subtree() {
+    let css = "div { margin-left: 1px }";
+    let env = Environment::default();
+    let (mut t, divs) = big_tree();
+    let mut r = resolver_for(css);
+    let _ = r.resolve(&t, &env);
+
+    t.set_inline(divs[4], "margin-left: 5px");
+    r.invalidate(&t, StyleChange::InlineStyleChanged(divs[4]));
+    let map = r.restyle(&t, &env);
+    // The div changed, so its span is restyled. The span is unchanged (margins are
+    // not inherited), so the em below it is skipped by the equality cutoff.
+    assert_eq!(r.last_restyle_count(), 2, "the div and its span");
+    assert_eq!(map, full(css, &t, &env));
+}
+
+#[test]
+fn a_has_rule_forces_a_full_restyle_on_attribute_changes() {
+    let css = "div:has(em) { margin-left: 1px }";
+    let env = Environment::default();
+    let (mut t, divs) = big_tree();
+    let mut r = resolver_for(css);
+    let _ = r.resolve(&t, &env);
+    t.add_class(divs[0], "unrelated");
+    r.invalidate(&t, StyleChange::AttributeChanged(divs[0]));
+    let map = r.restyle(&t, &env);
+    assert_eq!(map, full(css, &t, &env));
+}

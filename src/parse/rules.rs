@@ -15,7 +15,7 @@ use super::supports::supports_condition;
 use crate::ast::selector::SelectorList;
 use crate::ast::{
     ContainerRule, DeclarationBlock, FontFaceRule, Keyframe, KeyframesRule, LayerRule, MediaRule,
-    PropertyRule, Rule, StyleRule, SupportsRule, UnknownAtRule,
+    PropertyRule, Rule, ScopeRule, StyleRule, SupportsRule, UnknownAtRule,
 };
 use crate::limits::ParseLimits;
 use crate::syntax::{trim_whitespace, BlockKind, ComponentValue, Span, Token, TokenKind};
@@ -104,6 +104,10 @@ fn at_rule(
             .collect(),
         "keyframes" | "-webkit-keyframes" => keyframes_rule(at, limits, diagnostics)
             .map(Rule::Keyframes)
+            .into_iter()
+            .collect(),
+        "scope" => scope_rule(at, limits, diagnostics, depth)
+            .map(Rule::Scope)
             .into_iter()
             .collect(),
         "font-face" => font_face_rule(at, limits, diagnostics)
@@ -768,4 +772,85 @@ fn consume_at_rule(values: &[ComponentValue], start: usize, name: &str) -> (Unkn
         },
         values.len(),
     )
+}
+
+/// `@scope (root)? (to (limit))? { rules }` (CSS Cascade 6).
+fn scope_rule(
+    at: UnknownAtRule,
+    limits: &ParseLimits,
+    diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
+) -> Option<ScopeRule> {
+    const SCOPE_URL: &str = "https://www.w3.org/TR/css-cascade-6/#scope-atrule";
+    let block = required_block(&at, diagnostics, SCOPE_URL)?;
+    let prelude = trim_whitespace(&at.prelude);
+    let paren_selector = |v: Option<&ComponentValue>| -> Result<Option<SelectorList>, Diagnostic> {
+        match v {
+            Some(ComponentValue::Block(b)) if b.kind == BlockKind::Paren => {
+                parse_selector_list(trim_whitespace(&b.value), limits).map(Some)
+            }
+            _ => Ok(None),
+        }
+    };
+    let mut i = 0;
+    let root = match paren_selector(prelude.first()) {
+        Ok(root) => root,
+        Err(diag) => {
+            diagnostics.push(diag);
+            return None;
+        }
+    };
+    if root.is_some() {
+        i = 1;
+    }
+    while i < prelude.len() && prelude[i].is_whitespace() {
+        i += 1;
+    }
+    let mut limit = None;
+    if i < prelude.len() {
+        if !ident_word(prelude.get(i), "to") {
+            diagnostics.push(malformed(at.span, "malformed @scope prelude", SCOPE_URL));
+            return None;
+        }
+        i += 1;
+        while i < prelude.len() && prelude[i].is_whitespace() {
+            i += 1;
+        }
+        match paren_selector(prelude.get(i)) {
+            Ok(Some(list)) => limit = Some(list),
+            Ok(None) => {
+                diagnostics.push(malformed(
+                    at.span,
+                    "@scope limit needs a selector",
+                    SCOPE_URL,
+                ));
+                return None;
+            }
+            Err(diag) => {
+                diagnostics.push(diag);
+                return None;
+            }
+        }
+        i += 1;
+        if prelude[i..].iter().any(|v| !v.is_whitespace()) {
+            diagnostics.push(malformed(at.span, "malformed @scope prelude", SCOPE_URL));
+            return None;
+        }
+    }
+    if too_deep(limits, depth, at.span, diagnostics) {
+        return None;
+    }
+    let rules = consume_rule_list(&block, limits, diagnostics, depth + 1);
+    Some(ScopeRule {
+        root,
+        limit,
+        rules,
+        span: at.span,
+    })
+}
+
+/// True if `v` is the identifier `word` (ASCII case-insensitive).
+fn ident_word(v: Option<&ComponentValue>, word: &str) -> bool {
+    matches!(v, Some(ComponentValue::Token(t))
+        if matches!(&t.kind, TokenKind::Ident(s) if s.eq_ignore_ascii_case(word)))
 }

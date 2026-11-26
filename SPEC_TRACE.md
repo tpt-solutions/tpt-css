@@ -57,23 +57,23 @@ Design decisions and deviations are in [DESIGN.md](DESIGN.md).
 | Spec | Algorithm | Module | Tests | External | Status | Known gaps |
 | --- | --- | --- | --- | --- | --- | --- |
 | 13.2, Cascade 5 (origins) | origin and importance order | `cascade/origin.rs` `precedence` | `tests/cascade` | not run | done | Animation and transition ranks have no importance. |
-| 13.3 | cascade key | `cascade/mod.rs` `CascadeKey` | `tests/cascade` | not run | partial | Layer and scope proximity fields are M2. |
+| 13.3 | cascade key | `cascade/mod.rs` `CascadeKey` | `tests/cascade` | not run | partial | Layers are in the key. Scope proximity (Cascade 6) is not implemented. |
 | 13.3 | declaration order | `cascade/order.rs` | `tests/cascade` (`later_declaration_wins...`) | not run | done | |
 | 13.5 | inline style | `style/resolver.rs` `cascade` | `tests/cascade` (`inline_*`) | not run | done | |
 | 13.6 | shorthand expansion | `properties/shorthand.rs` | `tests/style/m1.rs` (shorthand tests) | not run | partial | `margin`, `padding`, `border` (and sides), `border-width/style/color`, `background` (color). `font`, `list-style`, `text-decoration` not implemented. |
 | 13.7 | custom properties, cascade, substitution, cycles | `style/custom.rs`, `style/resolver.rs` | `tests/style/m1.rs` (custom property tests) | not run | done | `@property` registration is M2. |
 | 13.8 | `initial`, `inherit`, `unset` | `style/resolver.rs` `specified_value` | `tests/style` | not run | done | `revert` and `revert-layer` are M2. |
-| 13.4 | layers | — | — | — | todo | M2. |
+| 13.4 | cascade layers and layer ranks | `cascade/mod.rs` `layer_rank`, `style/resolver.rs` `flatten` | `tests/cascade/layers.rs` | not run | done | Layer order is the order of first declaration. |
 
 ## Values and properties (spec 14, 15)
 
 | Spec | Algorithm | Module | Tests | External | Status | Known gaps |
 | --- | --- | --- | --- | --- | --- | --- |
 | 14.3 | length units: px, em, rem, vw, vh, vmin, vmax, cm, mm, Q, in, pt, pc, and percent | `values/length.rs`, `style/computed.rs` `to_px` | `tests/style/m1.rs`, `tests/style` | not run | done | Viewport units use the environment viewport. Viewport units in media queries are not valid and fall back. |
-| 14.3 | other units (`ex`, `ch`, `cap`, `ic`, `lh`, `rlh`, container units, `fr`) | — | — | — | todo | M2. |
-| 14.4 | `calc()`, `min()`, `max()`, `clamp()` | `values/calc.rs` | `tests/style/m1.rs` (math tests) | not run | partial | Type-checked. `+ - * /`, min, max, clamp. Trig, `round()`, `mod()`, `pow()`, and the other M4 functions are not implemented. |
-| 14.5 | colors: named, `transparent`, `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()`, `rgba()`, `hsl()`, `hsla()`, `hwb()` | `values/color.rs` | `tests/style` (color tests), `tests/style/m1.rs` | not run | partial | The named color table has 16 basic colors and `orange`. The full 148-name table is pending. |
-| 14.5 | `lab()`, `lch()`, `oklab()`, `oklch()`, `color-mix()` | — | — | — | todo | Modern color spaces, not started. |
+| 14.3 | other units (`ex`, `ch`, `cap`, `ic`, `lh`, `rlh`, `fr`) | — | — | — | todo | Font-relative units beyond `em` and `rem` are not implemented. `fr` belongs to grid, which is not started. |
+| 14.4 | `calc()`, `min()`, `max()`, `clamp()`, and the numeric functions (`round`, `mod`, `rem`, `abs`, `sign`, `hypot`, `sqrt`, `pow`, `log`, `exp`, trig, `atan2`, `progress`) | `values/calc.rs` | `tests/style/m1.rs`, `tests/style/m3.rs` | not run | done | Type-checked at parse time. Trig takes unitless radians, since angle units are not parsed as values. The depth limit is a fixed constant. |
+| 14.5 | colors: named (all 148), `transparent`, hex (3, 4, 6, and 8 digits), `rgb()`, `hsl()`, `hwb()`, `lab()`, `lch()`, `oklab()`, `oklch()`, `color()` (srgb, srgb-linear), `color-mix()` (srgb) | `values/color.rs` | `tests/style`, `tests/style/m3.rs` | not run | partial | Every space converts to sRGB at parse time. Relative color syntax (`rgb(from ...)`) and mixing in other spaces are not implemented. |
+| 14.5 | modern color spaces (`lab`, `lch`, `oklab`, `oklch`) | `values/color.rs` | `tests/style/m3.rs` | not run | done | Converted to sRGB at parse time; out-of-gamut values are clamped. |
 | 14.2 | deterministic serialization | `values/serialize.rs`, `values/calc.rs` `serialize` | `tests/style` | not run | partial | Canonical form only. Spec-exact CSSOM serialization is M3. |
 | 14.6 | `var()` | `style/custom.rs` `substitute` | `tests/style/m1.rs` | not run | done | `env()` and `attr()` are not implemented. |
 | 15.1 | property registry | `properties/registry.rs` | `tests/style` | n/a | done | `animatable` and `layout_effect` fields are M2 and M3. |
@@ -109,8 +109,8 @@ Design decisions and deviations are in [DESIGN.md](DESIGN.md).
 | M0 | Done, with the partial items above. Merged to `master`. |
 | M1 | Largely done on branch `m1-practical-css`. Open items are in TODO.md section 3 (shorthands `font`, `list-style`, `text-decoration`; full named colors; modern color spaces; invalidation index; an AppFront document fixture). |
 | M2 | Largely done on branch `m2-modern-cascade`. Open items are in TODO.md section 4 (`@scope` and scope proximity, `:has()`, `color()`, container units, keyframe interpolation). |
-| M3 | Not started. |
-| M4 | Not started. |
+| M3 | Partly done. CSSOM (feature `cssom`), devtools inspection, the `getComputedStyle` contract, and the equality-cutoff restyle are in. Open: dependency graph, style sharing, custom property dependency graph. See TODO.md section 5. |
+| M4 | Partly done. Numeric math functions, the full color set and modern color spaces, and keyframe interpolation are in. The long-tail selectors, properties, and shadow-tree items are open. See TODO.md section 6. |
 
 ## M2 additions
 
@@ -121,9 +121,26 @@ Design decisions and deviations are in [DESIGN.md](DESIGN.md).
 | 13.8 | `all` | `style/resolver.rs` `compile_declaration` | `tests/style/m2.rs` | done | |
 | 16.4 | `@supports` | `parse/supports.rs` | `tests/style/m2.rs`, `tests/parse/m2.rs` | done | `font-tech()`, `font-format()` report false. |
 | 12.3 | CSS nesting, `&` | `parse/selectors.rs` `resolve_nesting`, `parse/rules.rs` | `tests/style/m2.rs`, `tests/parse/m2.rs` | done | Nested rules are resolved at parse time. |
-| 16.5 | `@container`, `ContainerSizeProvider` | `env/container.rs`, `style/resolver.rs` `containers_match` | `tests/integration/container.rs` | done | Container units are not done. |
+| 16.5 | `@container`, `ContainerSizeProvider`, container units | `env/container.rs`, `style/resolver.rs` `containers_match` | `tests/integration/container.rs`, `tests/style/m3.rs` | not run | done | Only the nearest size container is used. |
 | 15.1 | `@property` | `style/custom.rs` `syntax_matches`, `resolve_customs` | `tests/style/m2.rs` | done | Only the listed syntaxes are checked. |
 | 13.2 (animation origin) | `Origin::Animation` in the cascade | `cascade/origin.rs` | `tests/style/m2.rs` | partial | No animation driver; keyframes are stored, not interpolated. |
-| 14.5 | `light-dark()` | `properties/parse.rs`, `style/computed.rs` | `tests/style/m2.rs` | done | `color()` and relative color syntax are not done. |
-| 12.2 Tier 2 | state selectors | `selectors/matching.rs` | `tests/style/m2.rs` | done | `:has()`, `:scope`, `:host`, and the shadow selectors are not done. |
+| 14.5 | `light-dark()` | `properties/parse.rs`, `style/computed.rs` | `tests/style/m2.rs` | not run | done | Resolved at computed time from the color scheme. |
+| 12.2 Tier 2 | state selectors, `:has()`, `@scope`, `:scope` | `selectors/matching.rs`, `style/resolver.rs` `scope_for` | `tests/style/m2.rs`, `tests/selectors/m3.rs` | not run | done | `:host`, `:host-context()`, `::slotted()`, and `::part()` are not implemented (M4). |
 | 20.2 | visited policy | `style/resolver.rs` `VisitedPolicy` | `tests/style/m2.rs` | done | |
+
+## M3 and M4 additions
+
+| Spec | Algorithm | Module | Tests | Status | Known gaps |
+| --- | --- | --- | --- | --- | --- |
+| 8.2, 17 | restyle with an equality cutoff | `style/invalidation.rs`, `style/resolver.rs` `style_tree` | `tests/integration/invalidation.rs`, `tests/integration/property.rs`, `tests/integration/perf.rs` | partial | No dependency index; `AttributeChanged` carries no name; the restyle copies the map. |
+| 18 | CSSOM mutation and serialization | `cssom/mod.rs` (feature `cssom`) | `tests/cssom/main.rs` | done | Canonical serialization, not byte-preserving (spec 25.8). |
+| 18 | `getComputedStyle` contract | `style/computed.rs` `property_values` | `tests/style/m3.rs` | done | |
+| 7 `diagnostics` | devtools inspection | `style/inspect.rs` | `tests/style/m3.rs` | done | Reports the highest candidate; does not follow `revert`. |
+| 22.3 | seeded hostile-input tests | (tests only) | `tests/integration/property.rs` | partial | Not a coverage-guided fuzzer; no fuzz targets. |
+| 21.1 | measured throughput and restyle | (tests only) | `tests/integration/perf.rs` (ignored) | done | Numbers in DESIGN.md section 8, from one machine. |
+| 22.5 | spec trace consistency | (tests only) | `tests/integration/spec_trace.rs` | done | Checks that named files exist, not that the claims are right. |
+| 14.4 | `progress()`, `round()` and the rest | `values/calc.rs` | `tests/style/m3.rs` | done | |
+| 14.5 | `color-mix()` (srgb) | `values/color.rs` | `tests/style/m3.rs` | done | Other interpolation spaces are not implemented. |
+| 13.2, CSS Animations 1 | keyframe interpolation | `style/keyframes.rs` | `tests/style/m3.rs` | partial | No timeline; the host supplies the progress. |
+| 12.2 Tier 2 | `:has()`, `:scope` | `selectors/matching.rs` `Matcher` | `tests/selectors/m3.rs` | done | Invalidation is conservative (restyle everything on attribute change). |
+| CSS Cascade 6 | `@scope` | `style/resolver.rs` `scope_for`, `parse/rules.rs` `scope_rule` | `tests/selectors/m3.rs` | partial | Scope proximity ordering is not implemented. |

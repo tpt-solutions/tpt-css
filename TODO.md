@@ -79,7 +79,7 @@ All decisions are recorded in DESIGN.md section 2.
 - [x] `cascade/collect.rs`: collect matched declarations. Collection lives in `style/resolver.rs` (DESIGN.md 5).
 - [x] Cascade key struct (spec 13.3) and origin/importance ordering
 - [x] Inline style enters cascade by origin/importance/specificity/order (spec 13.5)
-- [ ] Shorthand expansion to longhands for cascade (spec 13.6, 15.3). No shorthands are registered yet (M1).
+- [x] Shorthand expansion to longhands for cascade (spec 13.6, 15.3). Done in M1 for `margin`, `padding`, `border` (and sides, width, style, color), and `background` (color only).
 - [x] CSS-wide keywords `initial`, `inherit`, `unset` (spec 13.8). `revert` and `revert-layer` are M2.
 
 ### Values (spec 14, basic)
@@ -139,75 +139,76 @@ All decisions are recorded in DESIGN.md section 2.
 - [~] M1 property set (spec 15.2). Added: `overflow`, `position`, `top`, `right`, `bottom`, `left`, `z-index`, `opacity`, `content`, `vertical-align`, `white-space`, `direction`, `unicode-bidi`. Plus the M0 set and the shorthands above. `font`, `list-style`, `text-decoration`, and background images are not implemented.
 - [~] Invalidation foundation (spec 17). Attribute, state, and inline changes restyle the subtree. Sibling-sensitive rules restyle the parent's subtree. Stylesheet and tree changes restyle everything. There is no dependency index yet (M3). Tests: `tests/integration/invalidation.rs`.
 - [x] Fixtures: selector, cascade, var, calc. Tests in `tests/selectors`, `tests/style/m1.rs`, `tests/cascade/media.rs`. Own fixture: `fixtures/mit/web-like.css`.
-- [ ] Style a nontrivial AppFront document. Not started. The M0 integration test covers only a small AppFront-style tree.
+- [x] Style a nontrivial AppFront document. `tests/integration/appfront.rs`: layers, custom-property theme, custom states, `:has()`, a media rule, and an incremental restyle.
 - [x] Style a static web-like fixture tree (`tests/integration/web_like.rs`)
 
 ## 4. M2: modern cascade (spec 24)
 
-- [x] `@layer` with first-declaration order and layer cascade rules (spec 13.4). Statement and block forms, anonymous layers, dotted nested names. Tests: `tests/cascade/layers.rs`.
-- [x] `@supports` using engine's own capabilities, `selector()`, `not`, `and`, `or` (spec 16.4). Evaluated at parse time against the real registry and selector parser. `font-tech()` and `font-format()` report false.
-- [ ] `@scope`, `:scope`, Cascade 6 scope proximity (spec 13.3). Not started.
-- [x] CSS nesting and `&` (spec 12.3). Nested style rules and nested `@media`. `&` is replaced by `:is(parent)`; a selector without `&` gets a descendant prefix.
-- [x] `@container` foundation and `ContainerSizeProvider` (spec 16.5). The host supplies sizes; named and unnamed queries; size features only. Container units are not done (see below).
-- [x] `@property` and registered custom properties (spec 13.7). `inherits`, `initial-value`, and `syntax` checks for `*`, `<length>`, `<number>`, `<integer>`, `<percentage>`, `<length-percentage>`, `<color>`.
-- [x] `revert` and `revert-layer` (spec 13.8). `revert` rolls back to lower origins; `revert-layer` to lower layers of the same origin.
-- [x] `all` shorthand (spec 13.8). Resets every property except `direction` and `unicode-bidi`; CSS-wide keywords only.
-- [x] Animation and transition cascade origins (spec 13.2). The origins take part in the cascade. No animation driver exists (spec 3).
-- [~] Keyframe style resolution (`@keyframes`). Parsed and stored (`resolver.keyframes(name)`). Interpolation is not implemented.
-- [x] `@font-face` parsing. Parsed and stored (`resolver.font_faces()`). Loading is the host's job (spec 3).
-- [~] Modern color functions: `color()`, relative color syntax, `light-dark()`. `light-dark()` is done. The rest is not started.
-- [~] Viewport and container units (spec 14.3). Viewport units were done in M1. Container units (`cqw` and the rest) are not done.
-- [~] `:has()`, `:host`, `:host-context()`, `::slotted()`, `::part()`, `:state()` (spec 12.2 Tier 2). Not started; `:has()` is M2 work, the shadow selectors are M4.
-- [x] Modern state selectors: `:focus-visible`, `:focus-within`, `:target`, `:any-link`, `:link`, `:visited`, form validity states, `:open`, `:closed`, `:modal`, `:popover-open`, `:default`, `:indeterminate`. `:visited` follows the policy in spec 20.2.
-- [x] Modern pseudo-elements: `::selection`, `::backdrop`, `::file-selector-button`. Generated without `content`.
-- [~] Layer and scope behavior tests (spec 22.1). Layer tests are done; scope tests wait for `@scope`.
-- [x] Registered custom property tests (`tests/style/m2.rs`).
-- [x] Container query integration test with size provider (`tests/integration/container.rs`).
-- [x] Animation declarations participate in cascade test (`tests/style/m2.rs`).
+- [x] `@layer` with first-declaration order and layer cascade rules (spec 13.4). Tests: `tests/cascade/layers.rs`.
+- [x] `@supports` using engine's own capabilities, `selector()`, `not`, `and`, `or` (spec 16.4). Evaluated at parse time.
+- [~] `@scope`, `:scope`, Cascade 6 scope proximity (spec 13.3). `@scope` with a root, a limit, and `:scope` is done (`tests/selectors/m3.rs`). Scope proximity ordering is not: scoped rules rank by specificity alone.
+- [x] CSS nesting and `&` (spec 12.3).
+- [x] `@container` foundation and `ContainerSizeProvider` (spec 16.5).
+- [x] `@property` and registered custom properties (spec 13.7).
+- [x] `revert` and `revert-layer` (spec 13.8).
+- [x] `all` shorthand (spec 13.8).
+- [x] Animation and transition cascade origins (spec 13.2). No animation driver exists (spec 3).
+- [x] Keyframe style resolution (`@keyframes`). `style::keyframes::value_at` interpolates numbers, lengths, percentages, and colors; other values change at the midpoint. The host supplies the progress; there is no timeline.
+- [x] `@font-face` parsing.
+- [~] Modern color functions: `color()`, relative color syntax, `light-dark()`. `light-dark()` and `color()` in `srgb` and `srgb-linear` are done. Relative color syntax (`rgb(from ...)`) is not.
+- [x] Viewport and container units (spec 14.3). `cqw`, `cqh`, `cqi`, `cqb`, `cqmin`, `cqmax` resolve against the nearest size container.
+- [x] `:has()`. Relative selectors in all four combinator forms (`tests/selectors/m3.rs`).
+- [~] `:host`, `:host-context()`, `::slotted()`, `::part()`, `:state()` (spec 12.2 Tier 2). Not started; these are shadow-tree selectors and belong to M4.
+- [x] Modern state selectors.
+- [x] Modern pseudo-elements: `::selection`, `::backdrop`, `::file-selector-button`.
+- [~] Layer and scope behavior tests (spec 22.1). Layer tests are done; scope tests cover the root, the limit, and `:scope`.
+- [x] Registered custom property tests.
+- [x] Container query integration test with size provider.
+- [x] Animation declarations participate in cascade test.
 
 ## 5. M3: incremental style + CSSOM (spec 24)
 
-- [ ] Selector dependency graph (spec 12.4, 17.2)
-- [ ] Custom property dependency graph (spec 17.2)
-- [ ] `StyleChange` enum and `RestyleHint` (spec 17.1, 17.2)
-- [ ] `invalidate` and `restyle` on `StyleResolver` (spec 8.2)
-- [ ] Style sharing with safe sharing key (spec 17.3)
-- [ ] `:has()` invalidation graph (spec 12.4)
-- [ ] Media and container query invalidation (spec 16.3, 16.5)
-- [ ] `cssom/`: `CSSStyleSheet`, `CSSRuleList`, rule types, `CSSStyleDeclaration` (spec 18), behind `cssom` feature
-- [ ] Mutation APIs with correct invalidation: `insert_rule`, `delete_rule`, `selector_text`, `set_property`, `remove_property` (spec 18)
-- [ ] Deterministic CSSOM serialization (spec 18, 7 `serialize`)
-- [ ] `getComputedStyle` support contract
-- [ ] Devtools-facing inspection data (spec 7 `diagnostics`)
-- [ ] Visited-link privacy policy: `VisitedPolicy` (spec 20.2)
-- [ ] Web profile integration tests (`--features web`)
-- [ ] Acceptance: incremental restyle, no full-document restyle for simple local changes
+- [~] Selector dependency graph (spec 12.4, 17.2). Not built. The restyle uses two conservative flags per rule: `structural` (sibling-dependent) and `needs_ancestors` (`:has()`, `:scope`, `@scope`). Each drives a wider restyle.
+- [ ] Custom property dependency graph (spec 17.2). Not started; a custom property change restyles the element it is on.
+- [~] `StyleChange` enum and `RestyleHint` (spec 17.1, 17.2). `StyleChange` exists, but `AttributeChanged` carries no attribute name, and there is no `RestyleHint` type.
+- [~] `invalidate` and `restyle` on `StyleResolver` (spec 8.2). Done, with an equality cutoff: an element whose computed style is unchanged stops the restyle, when every rule is subject-only.
+- [ ] Style sharing with safe sharing key (spec 17.3). Not started.
+- [~] `:has()` invalidation graph (spec 12.4). Conservative: any attribute change restyles everything when a `:has()` rule exists.
+- [~] Media and container query invalidation (spec 16.3, 16.5). An environment change or a container provider restyles everything. No finer tracking.
+- [x] `cssom/`: `CssomSheet`, rule and declaration editing, behind the `cssom` feature (spec 18). Tests: `tests/cssom/main.rs`. Rule types are represented by the rule AST, not by separate CSSOM interface types.
+- [x] Mutation APIs with correct invalidation: `insert_rule`, `delete_rule`, `selector_text`, `set_selector_text`, `set_property`, `remove_property`. A mutation returns `StyleSheetChanged`; the host replaces the sheet in the resolver.
+- [x] Deterministic CSSOM serialization (spec 18, 7 `serialize`). Canonical, not byte-preserving (spec 25.8).
+- [x] `getComputedStyle` support contract (`ComputedStyle::property_values`).
+- [x] Devtools-facing inspection data (spec 7 `diagnostics`), via `StyleResolver::inspect`.
+- [x] Visited-link privacy policy: `VisitedPolicy` (spec 20.2).
+- [~] Web profile integration tests (`--features web`). The `web` feature enables the CSSOM tests. There is no DOM adapter, so no end-to-end web test exists.
+- [~] Acceptance: incremental restyle, no full-document restyle for simple local changes. Met for subject-only rules: a local change restyles one element (`tests/integration/perf.rs`, `tests/integration/invalidation.rs`). The restyle still copies the whole map (about 32 ms for 10,000 elements, measured); returning a shared map is an open API change.
 
 ## 6. M4: long-tail web compatibility (spec 24)
 
-- [ ] Long-tail selectors (spec 12.2 Tier 3)
-- [ ] Long-tail properties and advanced values (spec 15.2)
-- [ ] Advanced colors and media features (spec 14.5, 16.3)
-- [ ] Shadow DOM edge cases (spec 9.3)
-- [ ] `::part`, `::slotted`, `::highlight()` and related pseudos
-- [ ] Serialization edge cases
-- [ ] Remaining calc functions: `round()`, `mod()`, `rem()`, trig, `pow()`, `sqrt()`, `log()`, `exp()`, `sign()`, `progress()` (spec 14.4)
-- [ ] External WPT CSS subsuite runs in CI from separate checkout (spec 22.2)
-- [ ] Record pass/fail deltas in `SPEC_TRACE.md` (spec 22.2)
+- [ ] Long-tail selectors (spec 12.2 Tier 3): `:defined`, `:local-link`, `:current`, `:past`, `:future`, media-state pseudos, and the rest. Not started; most need host state this engine does not model.
+- [ ] Long-tail properties and advanced values (spec 15.2). Not started beyond the M1 and M2 sets.
+- [~] Advanced colors and media features (spec 14.5, 16.3). Full named color set (148), `lab()`, `lch()`, `oklab()`, `oklch()`, `color()` (srgb), `color-mix()` (srgb). Media features `resolution`, `update`, `dynamic-range`, and `prefers-contrast` are not implemented; they never match.
+- [ ] Shadow DOM edge cases (spec 9.3). Not started. `ShadowInfo` is part of the tree contract but nothing reads it.
+- [ ] `::part`, `::slotted`, `::highlight()` and related pseudos. Not started; the pseudo-element identities exist, but they are not parsed.
+- [~] Serialization edge cases. Canonical serialization of values, selectors, and rules; the exact CSS spelling of every edge case is not checked.
+- [x] Remaining calc functions: `round()`, `mod()`, `rem()`, trig (`sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`), `pow()`, `sqrt()`, `log()`, `exp()`, `sign()`, `abs()`, `hypot()`, `progress()` (spec 14.4). Trig takes unitless radians, since angle units are not parsed as values.
+- [ ] External WPT CSS subsuite runs in CI from separate checkout (spec 22.2). Not run; it needs a separate checkout.
+- [ ] Record pass/fail deltas in `SPEC_TRACE.md` (spec 22.2). Depends on the WPT run above.
 
 ## 7. Cross-cutting (every milestone)
 
-- [~] Each algorithm cites its spec section (spec 2.5). Most modules cite their section. Not audited for every function.
-- [~] Each supported property, selector, cascade rule has tests (spec 2.5). Covered for M0. Not every property has its own test.
-- [x] `SPEC_TRACE.md` updated (spec 22.5)
-- [x] `CLEAN_ROOM.md` provenance log updated for each contributor (spec 23.1). Entry added for the M0 batch; it needs human review (see the log).
-- [ ] Fuzz targets: tokenizer, stylesheet, selector, declaration, var, calc, color (spec 22.3)
-- [ ] Property-based tests: specificity, cascade stability, shorthand round trip, calc invariants, `:is`/`:where` equivalence, cycle detection, serialization determinism (spec 22.4)
-- [ ] Performance targets measured: tokenizer throughput, static tree restyle (spec 21.1)
-- [~] Bounds enforced: tokens, nesting, selector work, var depth, calc depth, stylesheet and rule counts (spec 20.3). Done: tokens, nesting, selector work, rule and declaration counts, input size. Not yet: var depth, calc depth, stylesheet count.
-- [~] No panics on hostile input (spec 19.1). A seeded randomized test passes (`tests/integration`). It is not coverage-guided fuzzing.
-- [x] Determinism: no hash-map iteration in cascade (spec 21.3)
-- [ ] `cargo deny check licenses` and `bans` pass. Passes locally. Not yet run in CI on a runner.
+- [~] Each algorithm cites its spec section (spec 2.5). Most modules cite their section; not audited function by function.
+- [~] Each supported property, selector, cascade rule has tests (spec 2.5). Covered broadly; not every property has its own test.
+- [x] `SPEC_TRACE.md` updated (spec 22.5). A test (`tests/integration/spec_trace.rs`) checks that every file the trace names exists.
+- [x] `CLEAN_ROOM.md` provenance log updated for each contributor (spec 23.1). Entries added for each batch; each needs a human review.
+- [ ] Fuzz targets: tokenizer, stylesheet, selector, declaration, var, calc, color (spec 22.3). Not written. Seeded randomized tests stand in for them (`tests/integration/property.rs`); those are deterministic, not coverage-guided fuzzing.
+- [~] Property-based tests (spec 22.4). Seeded generators cover specificity additivity, `:is()` and `:where()` equivalence, incremental restyle against a full resolve, custom property cycle termination, declaration round trips, and hostile text. Shorthand round trips and calc invariants are not covered yet.
+- [~] Performance targets measured (spec 21.1). Tokenizer throughput and static-tree restyle measured (`tests/integration/perf.rs`, ignored by default; numbers in DESIGN.md section 8). Not measured: the 'avoid quadratic selector matching' target for wide trees with structural selectors.
+- [~] Bounds enforced (spec 20.3). Tokens, nesting, selector work and complexity, rule and declaration counts, input size, var depth, custom property cycles, and the step budget. Not enforced: calc depth is a fixed constant rather than configurable, and no stylesheet count limit exists.
+- [~] No panics on hostile input (spec 19.1). Seeded hostile-text tests; not a fuzzer.
+- [x] Determinism: no hash-map iteration in cascade (spec 21.3).
+- [x] `cargo deny check licenses` and `bans` pass locally. Not run in CI on a runner.
 - [x] No Apache-only dependencies in the dependency tree (spec 23.2). The core has no dependencies.
-- [x] No `unsafe` (spec 23.3)
-- [x] Each commit keeps `cargo test`, `cargo test --no-default-features`, `cargo test --features web` green. Checked on the working tree for the M0 batch.
+- [x] No `unsafe` (spec 23.3).
+- [x] Each commit keeps `cargo test`, `cargo test --no-default-features`, `cargo test --features web`, and `cargo test --features cssom` green. Checked on the working tree.

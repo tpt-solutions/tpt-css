@@ -48,7 +48,13 @@ impl Specificity {
             | SimpleSelector::Attribute(_)
             | SimpleSelector::PseudoClass(_)
             | SimpleSelector::Lang(_)
-            | SimpleSelector::Dir(_) => Specificity { a: 0, b: 1, c: 0 },
+            | SimpleSelector::Dir(_)
+            | SimpleSelector::Scope => Specificity { a: 0, b: 1, c: 0 },
+            SimpleSelector::Has(relatives) => relatives
+                .iter()
+                .map(|r| Specificity::of_complex(&r.selector))
+                .max()
+                .unwrap_or_default(),
             SimpleSelector::Nth(nth) => {
                 let base = Specificity { a: 0, b: 1, c: 0 };
                 match &nth.of {

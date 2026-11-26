@@ -5,10 +5,14 @@
 //! an AppFront-style tree and a DOM-adapter-style tree, deep trees, and
 //! hostile input.
 
+mod appfront;
 #[path = "../common/mod.rs"]
 mod common;
 mod container;
 mod invalidation;
+mod perf;
+mod property;
+mod spec_trace;
 mod web_like;
 
 use common::{style_of, TestTree};

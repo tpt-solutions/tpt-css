@@ -112,12 +112,16 @@ pub(crate) struct ComputeContext {
     pub viewport_height: f64,
     /// Whether the color scheme is dark, for `light-dark()`.
     pub dark: bool,
+    /// Size of the nearest size container, for container units. `None` falls
+    /// back to the viewport.
+    pub container: Option<(f64, f64)>,
 }
 
 impl ComputeContext {
     /// Converts a length to px in this context.
     fn to_px(self, value: f64, unit: LengthUnit) -> f64 {
         let (w, h) = (self.viewport_width, self.viewport_height);
+        let (cw, ch) = self.container.unwrap_or((w, h));
         match unit {
             LengthUnit::Px => value,
             LengthUnit::Em => value * self.font_size,
@@ -133,6 +137,12 @@ impl ComputeContext {
             LengthUnit::Q => value * 96.0 / 101.6,
             LengthUnit::Pt => value * 96.0 / 72.0,
             LengthUnit::Pc => value * 16.0,
+            LengthUnit::Cqw => value * cw / 100.0,
+            LengthUnit::Cqh => value * ch / 100.0,
+            LengthUnit::Cqi => value * cw / 100.0,
+            LengthUnit::Cqb => value * ch / 100.0,
+            LengthUnit::Cqmin => value * cw.min(ch) / 100.0,
+            LengthUnit::Cqmax => value * cw.max(ch) / 100.0,
         }
     }
 }
@@ -313,5 +323,18 @@ impl StyleMap {
     /// Removes the pseudo-element styles of `node`, before it is restyled.
     pub(crate) fn clear_pseudo(&mut self, node: NodeId) {
         self.pseudo.retain(|(n, _), _| *n != node);
+    }
+}
+
+impl ComputedStyle {
+    /// Every registered property with its computed value in CSS text, in registry
+    /// order. This is the contract for `getComputedStyle` (spec 18): all
+    /// longhands are present, even those left at their initial value.
+    pub fn property_values(&self) -> Vec<(&'static str, String)> {
+        PROPERTIES
+            .iter()
+            .zip(self.values.iter())
+            .map(|(spec, value)| (spec.name, crate::values::serialize::serialize_value(value)))
+            .collect()
     }
 }

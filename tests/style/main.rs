@@ -8,6 +8,7 @@
 mod common;
 mod m1;
 mod m2;
+mod m3;
 
 use common::{style_of, style_with, TestTree};
 use tpt_css::properties::ids;

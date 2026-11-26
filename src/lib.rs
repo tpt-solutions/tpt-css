@@ -18,6 +18,8 @@
 
 pub mod ast;
 pub mod cascade;
+#[cfg(feature = "cssom")]
+pub mod cssom;
 pub mod env;
 pub mod limits;
 pub mod parse;
@@ -39,6 +41,7 @@ pub use parse::{
 pub use style::computed::{ComputedStyle, StyleMap};
 pub use style::custom::CustomPropertyValue;
 pub use style::custom::RegisteredProperty;
+pub use style::inspect::Inspection;
 pub use style::invalidation::StyleChange;
 pub use style::resolver::{ResolverConfig, SheetId, StyleResolver, VisitedPolicy};
 pub use tree::contract::StyleTree;

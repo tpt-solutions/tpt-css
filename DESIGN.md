@@ -253,3 +253,89 @@ and the visited-link policy. The items still missing are listed at the end.
 - Container units (`cqw`, `cqh`, `cqi`, `cqb`, `cqmin`, `cqmax`).
 - `revert` in custom properties (treated as unset).
 - Style sharing and dependency-indexed invalidation (M3).
+
+## 8. M2 leftovers, M3, and M4 decisions
+
+This section covers the work that finished the open M2 items, and the M3 and M4
+items that could be done without an external conformance suite. The items that
+remain open are listed at the end.
+
+### Decisions
+
+1. **Calc numeric functions are nodes in the tree.** `CalcNode::Func` carries the
+   function and its arguments. Arguments are type-checked as the tree is built:
+   `round`, `mod`, `rem`, `abs`, and `hypot` take one kind (number or dimension),
+   while `sign` and the others take numbers and return numbers. `round()` takes a
+   strategy (`nearest` is the default; ties round toward positive infinity). A
+   function whose inputs are constants folds to a number. An undefined result (for
+   example `mod(x, 0)`) stays a tree rather than becoming an error.
+2. **Container units resolve against the nearest container.** The style engine
+   asks the `ContainerSizeProvider` for the nearest ancestor that reports a size.
+   `cqw`, `cqh`, `cqi`, `cqb`, `cqmin`, and `cqmax` fall back to the viewport when
+   no container exists.
+3. **Color spaces convert to sRGB at parse time.** `lab()` and `lch()` go through
+   XYZ (D50) and the Bradford-adapted matrix. `oklab()` and `oklch()` use the
+   published OKLab matrices. Out-of-gamut values are clamped. `color()` supports
+   `srgb` and `srgb-linear`. `color-mix()` supports `in srgb` with optional
+   percentages; interpolation in other spaces is not implemented and is dropped.
+4. **`:has()` is a relative selector matched against an anchor.** The matcher's
+   leftmost compound is checked against the anchor with the leading combinator's
+   relation. Candidates come from the element's children, descendants, or
+   following siblings, as the combinator requires. A rule that uses `:has()` can
+   depend on any ancestor, so an attribute change restyles everything (see 9).
+5. **`@scope` finds the nearest root, then checks the limit.** The root is the
+   nearest ancestor-or-self that matches the root selector (or the root element
+   when there is none). The walk stops at a limit element. `:scope` refers to the
+   innermost root. Cascade scope proximity (Cascade 6) is not implemented, so
+   scoped rules rank by specificity alone.
+6. **Keyframes interpolate per property.** Numbers, pixel lengths, percentages,
+   and colors interpolate linearly. Other values change at the midpoint. The host
+   supplies the progress; there is no timeline (spec 3).
+7. **Inspection reports the highest candidate.** `inspect()` gives the declaration
+   that wins each property, with its origin, layer, specificity, and source. It
+   does not follow `revert`; the computed value gives the final answer.
+8. **`getComputedStyle` is a registry-order list.** `property_values()` returns
+   every registered longhand with its serialized computed value, including the ones
+   left at their initial value.
+9. **Invalidation is more precise, and still conservative where it must be.** The
+   restyle stops at an element whose computed style is unchanged, when every rule
+   matches only its subject. Such an element's children cannot change, so they are
+   skipped. A rule with descendant, sibling, `:has()`, `:scope`, `@scope`, or
+   container conditions disables this cutoff, and an attribute change then restyles
+   the affected subtree (or everything, for `:has()` and `@scope`).
+10. **CSSOM is a checked mutation layer.** `CssomSheet` applies `insert_rule`,
+    `delete_rule`, `selector_text`, `set_property`, and `remove_property`. Each
+    mutation validates its input and leaves the sheet unchanged on an error. The
+    serializer is canonical: parsing the output and serializing again gives the same
+    text. A mutated sheet reaches the resolver through `to_stylesheet()` and a
+    sheet replacement, reported as `StyleChange::StyleSheetChanged`.
+11. **Equality of styles is structural.** The cutoff compares whole computed styles,
+    so a change that leaves every computed value equal stops the restyle.
+
+### Measured (release build, this machine)
+
+These numbers come from the ignored tests in `tests/integration/perf.rs`, run with
+`cargo test --release --test integration -- --ignored --nocapture`. They are
+engineering measurements, not claims about other machines (spec 21.1).
+
+- Tokenizer: about 9.7 million tokens per second.
+- Static tree of 10,000 elements: full resolve about 46 ms. A local restyle that
+  changes one element with a subject-only rule restyles 1 element, but takes about
+  32 ms, because `restyle` returns the whole map by value and copying it dominates
+  the time. Returning a shared map is the fix, and it is an API change (open item).
+
+### Still open
+
+- Scope proximity (Cascade 6) and `@scope`'s proximity ordering.
+- Relative color syntax, `rgb(from ...)`, and color interpolation in spaces other
+  than sRGB.
+- Container units across nested containers: only the nearest size container is used.
+- Shadow DOM: `::part()`, `::slotted()`, `::highlight()`, `:host`, `:host-context()`.
+- Style sharing, a dependency graph for custom properties, and a dependency index
+  for selectors (the cutoff and the conservative rules are the current approach).
+- `StyleChange::AttributeChanged` carries no attribute name, so the restyle cannot
+  yet use the name to skip rules.
+- Fuzz targets and coverage-guided fuzzing. The randomized tests are seeded and
+  deterministic, which is not the same thing.
+- The WPT subsuites, which need a separate checkout (spec 22.2).
+- Calc depth is a fixed constant in the value parsers, not a `ParseLimits` field.

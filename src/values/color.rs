@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Copyright (c) 2026 TPT Solutions
 
-//! Colors (spec 14.5). Supported: `transparent`, a subset of named colors,
-//! `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()`, `rgba()`, `hsl()`,
-//! `hsla()`, and `hwb()`.
-//!
-//! Gaps (recorded in SPEC_TRACE.md): the named color table has only the 16
-//! basic colors and `orange`, and the full 148-name table is pending.
-//! `lab()`, `lch()`, `oklab()`, `oklch()`, and `color-mix()` are not
-//! implemented. `currentcolor` is resolved by the property layer, not here.
+//! Colors (spec 14.5). Supported: `transparent`, the 148 CSS named colors,
+//! `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()`, `rgba()`, `hsl()`, `hsla()`,
+//! `hwb()`, `lab()`, `lch()`, `oklab()`, `oklch()`, `color()` in `srgb` and
+//! `srgb-linear`, and `color-mix()` in `srgb`. Every space is converted to sRGB at
+//! parse time. Relative color syntax (`rgb(from ...)`) is not implemented.
+//! `currentcolor` is resolved by the property layer, not here.
 
 use crate::syntax::{trim_whitespace, ComponentValue, TokenKind};
 
@@ -65,24 +63,154 @@ impl Color {
 /// Basic named colors (CSS Color 4, basic named colors) plus
 /// `orange`. Values are the standard sRGB hex values.
 const NAMED: &[(&str, [u8; 3])] = &[
-    ("black", [0, 0, 0]),
-    ("silver", [192, 192, 192]),
-    ("gray", [128, 128, 128]),
-    ("grey", [128, 128, 128]),
-    ("white", [255, 255, 255]),
-    ("maroon", [128, 0, 0]),
-    ("red", [255, 0, 0]),
-    ("purple", [128, 0, 128]),
-    ("fuchsia", [255, 0, 255]),
-    ("green", [0, 128, 0]),
-    ("lime", [0, 255, 0]),
-    ("olive", [128, 128, 0]),
-    ("yellow", [255, 255, 0]),
-    ("navy", [0, 0, 128]),
-    ("blue", [0, 0, 255]),
-    ("teal", [0, 128, 128]),
+    ("aliceblue", [240, 248, 255]),
+    ("antiquewhite", [250, 235, 215]),
     ("aqua", [0, 255, 255]),
+    ("aquamarine", [127, 255, 212]),
+    ("azure", [240, 255, 255]),
+    ("beige", [245, 245, 220]),
+    ("bisque", [255, 228, 196]),
+    ("black", [0, 0, 0]),
+    ("blanchedalmond", [255, 235, 205]),
+    ("blue", [0, 0, 255]),
+    ("blueviolet", [138, 43, 226]),
+    ("brown", [165, 42, 42]),
+    ("burlywood", [222, 184, 135]),
+    ("cadetblue", [95, 158, 160]),
+    ("chartreuse", [127, 255, 0]),
+    ("chocolate", [210, 105, 30]),
+    ("coral", [255, 127, 80]),
+    ("cornflowerblue", [100, 149, 237]),
+    ("cornsilk", [255, 248, 220]),
+    ("crimson", [220, 20, 60]),
+    ("cyan", [0, 255, 255]),
+    ("darkblue", [0, 0, 139]),
+    ("darkcyan", [0, 139, 139]),
+    ("darkgoldenrod", [184, 134, 11]),
+    ("darkgray", [169, 169, 169]),
+    ("darkgreen", [0, 100, 0]),
+    ("darkgrey", [169, 169, 169]),
+    ("darkkhaki", [189, 183, 107]),
+    ("darkmagenta", [139, 0, 139]),
+    ("darkolivegreen", [85, 107, 47]),
+    ("darkorange", [255, 140, 0]),
+    ("darkorchid", [153, 50, 204]),
+    ("darkred", [139, 0, 0]),
+    ("darksalmon", [233, 150, 122]),
+    ("darkseagreen", [143, 188, 143]),
+    ("darkslateblue", [72, 61, 139]),
+    ("darkslategray", [47, 79, 79]),
+    ("darkslategrey", [47, 79, 79]),
+    ("darkturquoise", [0, 206, 209]),
+    ("darkviolet", [148, 0, 211]),
+    ("deeppink", [255, 20, 147]),
+    ("deepskyblue", [0, 191, 255]),
+    ("dimgray", [105, 105, 105]),
+    ("dimgrey", [105, 105, 105]),
+    ("dodgerblue", [30, 144, 255]),
+    ("firebrick", [178, 34, 34]),
+    ("floralwhite", [255, 250, 240]),
+    ("forestgreen", [34, 139, 34]),
+    ("fuchsia", [255, 0, 255]),
+    ("gainsboro", [220, 220, 220]),
+    ("ghostwhite", [248, 248, 255]),
+    ("gold", [255, 215, 0]),
+    ("goldenrod", [218, 165, 32]),
+    ("gray", [128, 128, 128]),
+    ("green", [0, 128, 0]),
+    ("greenyellow", [173, 255, 47]),
+    ("grey", [128, 128, 128]),
+    ("honeydew", [240, 255, 240]),
+    ("hotpink", [255, 105, 180]),
+    ("indianred", [205, 92, 92]),
+    ("indigo", [75, 0, 130]),
+    ("ivory", [255, 255, 240]),
+    ("khaki", [240, 230, 140]),
+    ("lavender", [230, 230, 250]),
+    ("lavenderblush", [255, 240, 245]),
+    ("lawngreen", [124, 252, 0]),
+    ("lemonchiffon", [255, 250, 205]),
+    ("lightblue", [173, 216, 230]),
+    ("lightcoral", [240, 128, 128]),
+    ("lightcyan", [224, 255, 255]),
+    ("lightgoldenrodyellow", [250, 250, 210]),
+    ("lightgray", [211, 211, 211]),
+    ("lightgreen", [144, 238, 144]),
+    ("lightgrey", [211, 211, 211]),
+    ("lightpink", [255, 182, 193]),
+    ("lightsalmon", [255, 160, 122]),
+    ("lightseagreen", [32, 178, 170]),
+    ("lightskyblue", [135, 206, 250]),
+    ("lightslategray", [119, 136, 153]),
+    ("lightslategrey", [119, 136, 153]),
+    ("lightsteelblue", [176, 196, 222]),
+    ("lightyellow", [255, 255, 224]),
+    ("lime", [0, 255, 0]),
+    ("limegreen", [50, 205, 50]),
+    ("linen", [250, 240, 230]),
+    ("magenta", [255, 0, 255]),
+    ("maroon", [128, 0, 0]),
+    ("mediumaquamarine", [102, 205, 170]),
+    ("mediumblue", [0, 0, 205]),
+    ("mediumorchid", [186, 85, 211]),
+    ("mediumpurple", [147, 112, 219]),
+    ("mediumseagreen", [60, 179, 113]),
+    ("mediumslateblue", [123, 104, 238]),
+    ("mediumspringgreen", [0, 250, 154]),
+    ("mediumturquoise", [72, 209, 204]),
+    ("mediumvioletred", [199, 21, 133]),
+    ("midnightblue", [25, 25, 112]),
+    ("mintcream", [245, 255, 250]),
+    ("mistyrose", [255, 228, 225]),
+    ("moccasin", [255, 228, 181]),
+    ("navajowhite", [255, 222, 173]),
+    ("navy", [0, 0, 128]),
+    ("oldlace", [253, 245, 230]),
+    ("olive", [128, 128, 0]),
+    ("olivedrab", [107, 142, 35]),
     ("orange", [255, 165, 0]),
+    ("orangered", [255, 69, 0]),
+    ("orchid", [218, 112, 214]),
+    ("palegoldenrod", [238, 232, 170]),
+    ("palegreen", [152, 251, 152]),
+    ("paleturquoise", [175, 238, 238]),
+    ("palevioletred", [219, 112, 147]),
+    ("papayawhip", [255, 239, 213]),
+    ("peachpuff", [255, 218, 185]),
+    ("peru", [205, 133, 63]),
+    ("pink", [255, 192, 203]),
+    ("plum", [221, 160, 221]),
+    ("powderblue", [176, 224, 230]),
+    ("purple", [128, 0, 128]),
+    ("rebeccapurple", [102, 51, 153]),
+    ("red", [255, 0, 0]),
+    ("rosybrown", [188, 143, 143]),
+    ("royalblue", [65, 105, 225]),
+    ("saddlebrown", [139, 69, 19]),
+    ("salmon", [250, 128, 114]),
+    ("sandybrown", [244, 164, 96]),
+    ("seagreen", [46, 139, 87]),
+    ("seashell", [255, 245, 238]),
+    ("sienna", [160, 82, 45]),
+    ("silver", [192, 192, 192]),
+    ("skyblue", [135, 206, 235]),
+    ("slateblue", [106, 90, 205]),
+    ("slategray", [112, 128, 144]),
+    ("slategrey", [112, 128, 144]),
+    ("snow", [255, 250, 250]),
+    ("springgreen", [0, 255, 127]),
+    ("steelblue", [70, 130, 180]),
+    ("tan", [210, 180, 140]),
+    ("teal", [0, 128, 128]),
+    ("thistle", [216, 191, 216]),
+    ("tomato", [255, 99, 71]),
+    ("turquoise", [64, 224, 208]),
+    ("violet", [238, 130, 238]),
+    ("wheat", [245, 222, 179]),
+    ("white", [255, 255, 255]),
+    ("whitesmoke", [245, 245, 245]),
+    ("yellow", [255, 255, 0]),
+    ("yellowgreen", [154, 205, 50]),
 ];
 
 /// Parses a single color value. Returns `None` if the value is not a color.
@@ -110,6 +238,12 @@ pub fn parse_color(values: &[ComponentValue]) -> Option<Color> {
             "rgb" | "rgba" => parse_rgb_arguments(&f.value),
             "hsl" | "hsla" => parse_hsl(&f.value),
             "hwb" => parse_hwb(&f.value),
+            "lab" => parse_lab(&f.value, false),
+            "lch" => parse_lab(&f.value, true),
+            "oklab" => parse_oklab(&f.value, false),
+            "oklch" => parse_oklab(&f.value, true),
+            "color" => parse_color_function(&f.value),
+            "color-mix" => parse_color_mix(&f.value),
             _ => None,
         },
         _ => None,
@@ -360,4 +494,226 @@ fn parse_rgb_arguments(args: &[ComponentValue]) -> Option<Color> {
         ],
         alpha: alpha_value as f32,
     })
+}
+
+/// Splits a color function's arguments into components and an optional alpha.
+/// Both the comma form and the space form (with `/` for alpha) are accepted.
+fn components_and_alpha(
+    args: &[ComponentValue],
+) -> Option<(Vec<&ComponentValue>, Option<&ComponentValue>)> {
+    let args = trim_whitespace(args);
+    let has_comma = args.iter().any(|v| v.is_token(&TokenKind::Comma));
+    let items: Vec<&ComponentValue> = if has_comma {
+        let mut out = Vec::new();
+        for part in crate::parse::split_on(args, |v| v.is_token(&TokenKind::Comma)) {
+            let part = trim_whitespace(part);
+            let [only] = part else {
+                return None;
+            };
+            out.push(only);
+        }
+        out
+    } else {
+        args.iter().filter(|v| !v.is_whitespace()).collect()
+    };
+    match items.as_slice() {
+        [a, b, c] => Some((vec![*a, *b, *c], None)),
+        [a, b, c, alpha] if has_comma => Some((vec![*a, *b, *c], Some(*alpha))),
+        [a, b, c, slash, alpha] if slash.is_token(&TokenKind::Delim('/')) => {
+            Some((vec![*a, *b, *c], Some(*alpha)))
+        }
+        _ => None,
+    }
+}
+
+/// A component value as a number, where a percentage maps `100%` to `full`.
+fn scaled(v: &ComponentValue, full: f64) -> Option<f64> {
+    match as_arg(v)? {
+        Arg::Number(n) => Some(n),
+        Arg::Percent(p) => Some(p / 100.0 * full),
+    }
+}
+
+/// `lab(L a b [/ alpha])` and `lch(L C h [/ alpha])` (CSS Color 4 section 9).
+fn parse_lab(args: &[ComponentValue], polar: bool) -> Option<Color> {
+    let (c, alpha) = components_and_alpha(args)?;
+    let l = scaled(c[0], 100.0)?.clamp(0.0, 100.0);
+    let (a, b) = if polar {
+        let chroma = scaled(c[1], 150.0)?.max(0.0);
+        let hue = hue_degrees(c[2])?.to_radians();
+        (chroma * hue.cos(), chroma * hue.sin())
+    } else {
+        (scaled(c[1], 125.0)?, scaled(c[2], 125.0)?)
+    };
+    Some(from_linear_rgb_clamped(lab_to_srgb(l, a, b), alpha))
+}
+
+/// `oklab(L a b [/ alpha])` and `oklch(L C h [/ alpha])` (CSS Color 4 section 9).
+fn parse_oklab(args: &[ComponentValue], polar: bool) -> Option<Color> {
+    let (c, alpha) = components_and_alpha(args)?;
+    let l = scaled(c[0], 1.0)?.clamp(0.0, 1.0);
+    let (a, b) = if polar {
+        let chroma = scaled(c[1], 0.4)?.max(0.0);
+        let hue = hue_degrees(c[2])?.to_radians();
+        (chroma * hue.cos(), chroma * hue.sin())
+    } else {
+        (scaled(c[1], 0.4)?, scaled(c[2], 0.4)?)
+    };
+    Some(from_linear_rgb_clamped(
+        oklab_to_linear_srgb(l, a, b),
+        alpha,
+    ))
+}
+
+/// `color(srgb r g b [/ a])` and `color(srgb-linear ...)` (CSS Color 4 section 10).
+fn parse_color_function(args: &[ComponentValue]) -> Option<Color> {
+    let args = trim_whitespace(args);
+    let (space, rest) = match args.split_first() {
+        Some((ComponentValue::Token(t), rest)) => match &t.kind {
+            TokenKind::Ident(s) => (s.to_ascii_lowercase(), rest),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    let (c, alpha) = components_and_alpha(rest)?;
+    let channels = [
+        scaled(c[0], 1.0)?.clamp(0.0, 1.0),
+        scaled(c[1], 1.0)?.clamp(0.0, 1.0),
+        scaled(c[2], 1.0)?.clamp(0.0, 1.0),
+    ];
+    let srgb = match space.as_str() {
+        "srgb" => channels,
+        "srgb-linear" => channels.map(encode_srgb),
+        _ => return None,
+    };
+    Some(Color {
+        space: ColorSpace::Srgb,
+        components: [srgb[0] as f32, srgb[1] as f32, srgb[2] as f32],
+        alpha: alpha_of(alpha.and_then(as_arg)),
+    })
+}
+
+/// `color-mix(in srgb, A [p%], B [q%])` (CSS Color 5). Only sRGB is supported.
+fn parse_color_mix(args: &[ComponentValue]) -> Option<Color> {
+    let parts = crate::parse::split_on(trim_whitespace(args), |v| v.is_token(&TokenKind::Comma));
+    let [space, first, second] = parts.as_slice() else {
+        return None;
+    };
+    let space: Vec<&ComponentValue> = trim_whitespace(space)
+        .iter()
+        .filter(|v| !v.is_whitespace())
+        .collect();
+    match space.as_slice() {
+        [ComponentValue::Token(a), ComponentValue::Token(b)]
+            if matches!(&a.kind, TokenKind::Ident(s) if s.eq_ignore_ascii_case("in"))
+                && matches!(&b.kind, TokenKind::Ident(s) if s.eq_ignore_ascii_case("srgb")) => {}
+        _ => return None,
+    }
+    let (ca, pa) = color_with_percent(first)?;
+    let (cb, pb) = color_with_percent(second)?;
+    let (wa, wb) = match (pa, pb) {
+        (None, None) => (0.5, 0.5),
+        (Some(p), None) => (p / 100.0, 1.0 - p / 100.0),
+        (None, Some(q)) => (1.0 - q / 100.0, q / 100.0),
+        (Some(p), Some(q)) => {
+            let total = p + q;
+            if total <= 0.0 {
+                return None;
+            }
+            (p / total, q / total)
+        }
+    };
+    if !(0.0..=1.0).contains(&wa) || !(0.0..=1.0).contains(&wb) {
+        return None;
+    }
+    let (wa, wb) = (wa as f32, wb as f32);
+    let mut components = [0.0f32; 3];
+    for (i, out) in components.iter_mut().enumerate() {
+        *out = ca.components[i] * wa + cb.components[i] * wb;
+    }
+    Some(Color {
+        space: ColorSpace::Srgb,
+        components,
+        alpha: ca.alpha * wa + cb.alpha * wb,
+    })
+}
+
+/// A color followed by an optional percentage weight.
+fn color_with_percent(values: &[ComponentValue]) -> Option<(Color, Option<f64>)> {
+    let values = trim_whitespace(values);
+    match values.last() {
+        Some(ComponentValue::Token(t)) => match t.kind {
+            TokenKind::Percentage(p) => {
+                let color = parse_color(&values[..values.len() - 1])?;
+                Some((color, Some(p)))
+            }
+            _ => Some((parse_color(values)?, None)),
+        },
+        _ => Some((parse_color(values)?, None)),
+    }
+}
+
+/// sRGB transfer function: linear light to gamma-encoded (CSS Color 4 section 4).
+fn encode_srgb(c: f64) -> f64 {
+    if c <= 0.0031308 {
+        12.92 * c
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
+    }
+}
+
+/// CIE Lab (D50) to linear sRGB, via XYZ (D50) and the Bradford-adapted matrix
+/// used by CSS Color 4.
+fn lab_to_srgb(l: f64, a: f64, b: f64) -> [f64; 3] {
+    const KAPPA: f64 = 24389.0 / 27.0;
+    const EPSILON: f64 = 216.0 / 24389.0;
+    let fy = (l + 16.0) / 116.0;
+    let fx = fy + a / 500.0;
+    let fz = fy - b / 200.0;
+    let finv = |f: f64| {
+        let cube = f * f * f;
+        if cube > EPSILON {
+            cube
+        } else {
+            (116.0 * f - 16.0) / KAPPA
+        }
+    };
+    // Reference white D50.
+    let x = finv(fx) * 0.96422;
+    let y = if l > KAPPA * EPSILON {
+        fy * fy * fy
+    } else {
+        l / KAPPA
+    };
+    let z = finv(fz) * 0.82521;
+    [
+        3.1338561 * x - 1.6168667 * y - 0.4906146 * z,
+        -0.9787684 * x + 1.9161415 * y + 0.0334540 * z,
+        0.0719453 * x - 0.2289914 * y + 1.4052427 * z,
+    ]
+}
+
+/// OKLab to linear sRGB, with the matrices from the published OKLab definition
+/// (the same ones CSS Color 4 uses).
+fn oklab_to_linear_srgb(l: f64, a: f64, b: f64) -> [f64; 3] {
+    let l_ = l + 0.396_337_777_4 * a + 0.215_803_757_3 * b;
+    let m_ = l - 0.105_561_345_8 * a - 0.063_854_172_8 * b;
+    let s_ = l - 0.089_484_177_5 * a - 1.291_485_548_0 * b;
+    let (l3, m3, s3) = (l_ * l_ * l_, m_ * m_ * m_, s_ * s_ * s_);
+    [
+        4.076_741_662_1 * l3 - 3.307_711_591_3 * m3 + 0.230_969_929_2 * s3,
+        -1.268_438_004_6 * l3 + 2.609_757_401_1 * m3 - 0.341_319_396_5 * s3,
+        -0.004_196_086_3 * l3 - 0.703_418_614_7 * m3 + 1.707_614_701_0 * s3,
+    ]
+}
+
+/// Linear sRGB to a gamma-encoded, gamut-clamped [`Color`]. `lab_to_srgb` returns
+/// linear light, so both spaces go through the same encoding.
+fn from_linear_rgb_clamped(linear: [f64; 3], alpha: Option<&ComponentValue>) -> Color {
+    let srgb = linear.map(|c| encode_srgb(c.clamp(0.0, 1.0)).clamp(0.0, 1.0));
+    Color {
+        space: ColorSpace::Srgb,
+        components: [srgb[0] as f32, srgb[1] as f32, srgb[2] as f32],
+        alpha: alpha_of(alpha.and_then(as_arg)),
+    }
 }
