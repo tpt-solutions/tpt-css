@@ -320,6 +320,11 @@ engineering measurements, not claims about other machines (spec 21.1).
 
 - Tokenizer: about 9 to 10 million tokens per second (two runs). Wide lists: 8,000
   siblings with `:nth-child()` and `+` rules resolve in about 50 ms (decision 25).
+- Sibling constructs, each alone (`sibling_constructs_scale_separately`), 2,000 and
+  8,000 `li` siblings. `li ~ li`: 16 ms and 60 ms, ratio 3.8. `li:nth-of-type(3n)`:
+  14 ms and 60 ms, ratio 4.3. These two scale linearly. `li:nth-child(2n of .x)`:
+  31 ms and 357 ms, ratio 11.7. Close to quadratic, because `of S` still tests each
+  sibling against S. This is the next performance task.
 - Static tree of 10,000 elements: full resolve about 45 to 50 ms (two runs). A local restyle that
   changes one element with a subject-only rule restyles 1 element and takes about
   34 µs, since `restyle` returns a reference into the cache (decision 16). It was
