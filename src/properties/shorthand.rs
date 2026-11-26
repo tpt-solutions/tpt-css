@@ -211,6 +211,7 @@ pub const SHORTHANDS: &[ShorthandSpec] = &[
             "text-decoration-style",
             "text-decoration-color",
             "text-decoration-thickness",
+            "text-decoration-skip-ink",
         ],
         expand: text_decoration,
     },
@@ -383,6 +384,7 @@ fn text_decoration(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> 
     let mut style = None;
     let mut color = None;
     let mut thickness = None;
+    let mut skip_ink = None;
     for part in &parts {
         if let [ComponentValue::Token(t)] = part {
             if let TokenKind::Ident(word) = &t.kind {
@@ -411,6 +413,17 @@ fn text_decoration(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> 
         if color.is_none() {
             if let Ok(v) = parse_as("text-decoration-color", part) {
                 color = Some(v);
+                continue;
+            }
+        }
+        // `none` is the line value and `auto` is the thickness, so the
+        // shorthand can only name skip-ink as `all`.
+        if let [ComponentValue::Token(t)] = part {
+            if matches!(&t.kind, TokenKind::Ident(w) if w.eq_ignore_ascii_case("all")) {
+                if skip_ink.is_some() {
+                    return Err(InvalidValue);
+                }
+                skip_ink = Some(SpecifiedValue::Value(Value::Keyword("all")));
                 continue;
             }
         }
@@ -446,6 +459,10 @@ fn text_decoration(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> 
         (
             "text-decoration-thickness",
             thickness.unwrap_or_else(|| initial_value("text-decoration-thickness")),
+        ),
+        (
+            "text-decoration-skip-ink",
+            skip_ink.unwrap_or_else(|| initial_value("text-decoration-skip-ink")),
         ),
     ])
 }

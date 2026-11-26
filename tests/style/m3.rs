@@ -1056,6 +1056,37 @@ fn text_decoration_thickness_grammar_and_shorthand_reset() {
 }
 
 #[test]
+fn text_decoration_skip_ink_longhand_and_shorthand() {
+    let ink = |css: &str| longhands_of(css, &["text-decoration-skip-ink"])[0].clone();
+    assert_eq!(
+        ink("child { text-decoration-skip-ink: all }"),
+        Value::Keyword("all")
+    );
+    assert_eq!(
+        ink("child { text-decoration-skip-ink: none }"),
+        Value::Keyword("none")
+    );
+    assert_eq!(
+        ink("child { text-decoration-skip-ink: bogus }"),
+        Value::Keyword("auto")
+    );
+    // The shorthand names skip-ink as `all`, and `none` stays the line value.
+    assert_eq!(
+        ink("child { text-decoration: underline all }"),
+        Value::Keyword("all")
+    );
+    assert_eq!(
+        longhands_of("child { text-decoration: none }", &["text-decoration-line"])[0],
+        Value::Keyword("none")
+    );
+    // The shorthand resets skip-ink to its initial value.
+    assert_eq!(
+        ink("child { text-decoration-skip-ink: all; text-decoration: underline }"),
+        Value::Keyword("auto")
+    );
+}
+
+#[test]
 fn border_radius_corner_accepts_one_or_two_values() {
     let corner = |css: &str| longhands_of(css, &["border-top-left-radius"])[0].clone();
     // Equal radii collapse to a single value.

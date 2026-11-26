@@ -904,6 +904,14 @@ pub const PROPERTIES: &[PropertySpec] = &[
         },
         spec_url: CSS_TEXT_DECOR,
     },
+    // 85
+    PropertySpec {
+        name: "text-decoration-skip-ink",
+        inherited: false,
+        initial: Initial::Keyword("auto"),
+        grammar: Grammar::Keywords(&["auto", "all", "none"]),
+        spec_url: CSS_TEXT_DECOR,
+    },
 ];
 
 const fn offset(name: &'static str) -> PropertySpec {
