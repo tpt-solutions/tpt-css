@@ -135,3 +135,47 @@ fn wide_sibling_list_with_structural_rules() {
     let ratio = timings[1].1.as_secs_f64() / timings[0].1.as_secs_f64().max(1e-9);
     println!("time ratio for 4x the siblings: {ratio:.1} (quadratic would be about 16)");
 }
+
+/// Growth of each sibling-walking construct on its own, so a slow one is not
+/// hidden by the fast ones in the combined test above. For each rule, the
+/// time is printed for 2,000 and 8,000 siblings; quadratic growth shows as
+/// about 16 times the time for 4 times the list.
+#[test]
+#[ignore]
+fn sibling_constructs_scale_separately() {
+    let rules = [
+        ("li ~ li", "li ~ li { padding-top: 1px }"),
+        (
+            "li:nth-of-type(3n)",
+            "li:nth-of-type(3n) { margin-top: 1px }",
+        ),
+        (
+            "li:nth-child(2n of .x)",
+            "li:nth-child(2n of .x) { margin-top: 1px }",
+        ),
+    ];
+    for (label, css) in rules {
+        let mut timings = Vec::new();
+        for n in [2_000usize, 8_000] {
+            let mut t = TestTree::new(NodeKind::Element);
+            let root = t.root();
+            t.nodes[0].name.local = "ul".into();
+            for i in 0..n {
+                let li = t.element(root, "li");
+                if i % 2 == 0 {
+                    t.add_class(li, "x");
+                }
+            }
+            let mut resolver = StyleResolver::new(ResolverConfig::default());
+            resolver.add_stylesheet(parse_sheet(css).stylesheet, Origin::Author);
+            let start = Instant::now();
+            let _ = resolver.resolve(&t, &Environment::default());
+            timings.push((n, start.elapsed()));
+        }
+        let ratio = timings[1].1.as_secs_f64() / timings[0].1.as_secs_f64().max(1e-9);
+        println!(
+            "{label}: {} siblings {:?}, {} siblings {:?}, ratio for 4x: {ratio:.1} (quadratic about 16)",
+            timings[0].0, timings[0].1, timings[1].0, timings[1].1
+        );
+    }
+}
