@@ -105,3 +105,15 @@ fn an_nth_selector_serializes_with_its_formula() {
         .serialize()
         .starts_with("li:nth-last-child(-n+3 of .x) {"));
 }
+
+#[test]
+fn shadow_selectors_serialize_in_their_own_syntax() {
+    use tpt_css::cssom::CssomSheet;
+    let sheet = CssomSheet::parse(
+        ":host(.on) span { color: red } ::slotted(p) { margin: 0 } .a::part(label) { color: red }",
+    );
+    let text = sheet.serialize();
+    assert!(text.contains(":host(.on) span"), "{text}");
+    assert!(text.contains("::slotted(p)"), "{text}");
+    assert!(text.contains(".a::part(label)"), "{text}");
+}

@@ -154,7 +154,7 @@ impl StyleResolver {
 
         let mut styled = 0;
         for node in dirty {
-            let parent_style = match tree.parent(node) {
+            let parent_style = match crate::tree::scope::flat_parent(tree, node) {
                 Some(p) if tree.kind(p) == NodeKind::Element => map.get(p).cloned(),
                 _ => None,
             };

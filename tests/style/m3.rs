@@ -1120,3 +1120,159 @@ fn every_subject_shape_is_found_by_the_index() {
     // A class the node does not have must not match.
     assert!(!px_near(s.raw(lookup("padding-right").unwrap()), 7.0));
 }
+
+#[test]
+fn the_configured_calc_limit_is_the_effective_limit() {
+    // 33 nested calc() calls: past the old internal bound of 32, within a configured limit of 40.
+    let mut css = String::from("child { margin-left: ");
+    for _ in 0..33 {
+        css.push_str("calc(");
+    }
+    css.push_str("1px");
+    for _ in 0..33 {
+        css.push(')');
+    }
+    css.push_str(" }");
+    assert!(px_near(&margin_with_calc_limit(&css, 40), 1.0));
+    assert_eq!(margin_with_calc_limit(&css, 32), margin("child { }"));
+}
+
+// ---- shadow DOM (spec 9.3, Shadow DOM 1) ----------------------------------------
+
+struct Shadowed {
+    t: TestTree,
+    host: NodeId,
+    light: NodeId,
+    unslotted: NodeId,
+    inner: NodeId,
+}
+
+/// `div.card` (the host) with two light `p` children, one assigned to a slot in
+/// its shadow tree and one not. The shadow tree holds a `slot` and a `span`.
+fn shadowed() -> Shadowed {
+    let mut t = TestTree::new(NodeKind::Element);
+    let doc = t.root();
+    t.nodes[0].name.local = "html".into();
+    let host = t.element(doc, "div");
+    t.add_class(host, "card");
+    let light = t.element(host, "p");
+    let unslotted = t.element(host, "p");
+    let root = t.attach_shadow(host);
+    let slot = t.element(root, "slot");
+    let inner = t.element(root, "span");
+    t.assign_slot(light, slot);
+    Shadowed {
+        t,
+        host,
+        light,
+        unslotted,
+        inner,
+    }
+}
+
+fn styled(doc_css: &str, shadow_css: &str, s: &Shadowed) -> tpt_css::StyleMap {
+    let mut r = StyleResolver::new(ResolverConfig::default());
+    r.add_stylesheet(parse_sheet(doc_css).stylesheet, Origin::Author);
+    let root = s.t.shadow_root_for(s.host);
+    r.add_shadow_stylesheet(root, parse_sheet(shadow_css).stylesheet, Origin::Author);
+    r.resolve(&s.t, &Environment::default()).clone()
+}
+
+#[test]
+fn a_shadow_sheet_styles_its_own_tree_and_document_rules_do_not_reach_it() {
+    let s = shadowed();
+    let red = Color::rgb8(255, 0, 0);
+    let map = styled("span { color: blue }", "span { color: red }", &s);
+    assert_eq!(style_of(&map, s.inner).color(), red);
+    // The document rule does not reach the span in the shadow tree.
+    let map = styled("span { color: blue }", "", &s);
+    assert_ne!(style_of(&map, s.inner).color(), Color::rgb8(0, 0, 255));
+}
+
+#[test]
+fn host_matches_the_host_and_its_functional_forms() {
+    let s = shadowed();
+    let css = ":host { margin-left: 3px } :host(.card) { margin-top: 4px } :host(.nope) { margin-right: 9px } :host-context(body) { margin-bottom: 5px }";
+    let map = styled("", css, &s);
+    let host = style_of(&map, s.host);
+    assert!(px_near(host.raw(lookup("margin-left").unwrap()), 3.0));
+    assert!(px_near(host.raw(lookup("margin-top").unwrap()), 4.0));
+    assert!(!px_near(host.raw(lookup("margin-right").unwrap()), 9.0));
+    // `:host-context(body)` needs an ancestor body; there is none here.
+    assert!(!px_near(host.raw(lookup("margin-bottom").unwrap()), 5.0));
+    // Outside the host, `:host` matches nothing.
+    assert!(!px_near(
+        style_of(&map, s.light).raw(lookup("margin-left").unwrap()),
+        3.0
+    ));
+}
+
+#[test]
+fn host_descendant_selectors_reach_into_the_shadow_tree() {
+    let s = shadowed();
+    let map = styled("", ":host span { color: green }", &s);
+    assert_eq!(style_of(&map, s.inner).color(), Color::rgb8(0, 128, 0));
+    // A document selector cannot cross into the shadow tree.
+    let map = styled("div span { color: blue }", "", &s);
+    assert_ne!(style_of(&map, s.inner).color(), Color::rgb8(0, 0, 255));
+}
+
+#[test]
+fn shadow_children_inherit_from_the_host() {
+    let s = shadowed();
+    let map = styled(".card { color: #010203 }", "", &s);
+    assert_eq!(style_of(&map, s.inner).color(), Color::rgb8(1, 2, 3));
+}
+
+#[test]
+fn slotted_applies_to_the_assigned_element_only() {
+    let s = shadowed();
+    let map = styled("", "::slotted(p) { margin-left: 4px }", &s);
+    assert!(px_near(
+        style_of(&map, s.light).raw(lookup("margin-left").unwrap()),
+        4.0
+    ));
+    assert!(!px_near(
+        style_of(&map, s.unslotted).raw(lookup("margin-left").unwrap()),
+        4.0
+    ));
+    // A document sheet's `::slotted()` has no shadow tree to refer to, so it does nothing.
+    let map = styled("::slotted(p) { margin-left: 4px }", "", &s);
+    assert!(!px_near(
+        style_of(&map, s.light).raw(lookup("margin-left").unwrap()),
+        4.0
+    ));
+}
+
+#[test]
+fn part_matches_an_element_with_the_part_name_under_a_matching_host() {
+    let mut s = shadowed();
+    s.t.set_attr(s.inner, "part", "label other");
+    let map = styled(".card::part(label) { color: purple }", "", &s);
+    assert_eq!(style_of(&map, s.inner).color(), Color::rgb8(128, 0, 128));
+    // A part name the element does not have does not match.
+    let map = styled(".card::part(missing) { color: purple }", "", &s);
+    assert_ne!(style_of(&map, s.inner).color(), Color::rgb8(128, 0, 128));
+    // A host selector that does not match the host does not match either.
+    let map = styled(".other::part(label) { color: purple }", "", &s);
+    assert_ne!(style_of(&map, s.inner).color(), Color::rgb8(128, 0, 128));
+}
+
+#[test]
+fn a_host_attribute_change_restyles_host_dependent_rules() {
+    let mut s = shadowed();
+    let mut r = StyleResolver::new(ResolverConfig::default());
+    let root = s.t.shadow_root_for(s.host);
+    r.add_shadow_stylesheet(
+        root,
+        parse_sheet(":host(.on) span { color: green }").stylesheet,
+        Origin::Author,
+    );
+    let _ = r.resolve(&s.t, &Environment::default());
+    s.t.add_class(s.host, "on");
+    r.invalidate(&s.t, tpt_css::StyleChange::AttributeChanged(s.host));
+    let restyled = r.restyle(&s.t, &Environment::default()).clone();
+    assert_eq!(style_of(&restyled, s.inner).color(), Color::rgb8(0, 128, 0));
+    let full = styled("", ":host(.on) span { color: green }", &s);
+    assert_eq!(restyled, full);
+}

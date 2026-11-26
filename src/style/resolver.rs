@@ -41,6 +41,7 @@ use crate::style::custom::{
     contains_var, resolve_customs, substitute, CustomPropertyValue, MapResolver, RegisteredProperty,
 };
 use crate::syntax::{trim_whitespace, ComponentValue, TokenKind};
+use crate::tree::scope::shadow_root_of;
 use crate::tree::{NodeId, NodeKind, StyleTree};
 use crate::values::{Color, Value};
 
@@ -129,6 +130,8 @@ pub(crate) struct LoadedSheet {
     pub id: SheetId,
     pub origin: Origin,
     pub rules: Vec<CompiledRule>,
+    /// The shadow root this sheet is scoped to, or `None` for a document sheet.
+    pub scope: Option<NodeId>,
 }
 
 /// The winning declaration for one property or custom property, with its key.
@@ -212,6 +215,9 @@ pub struct StyleResolver {
     pub(crate) index: super::rule_index::RuleIndex,
     /// Element sibling positions, cleared at the start of each style pass.
     pub(crate) siblings: crate::selectors::matching::SiblingCache,
+    /// True if some sheet is shadow-scoped or uses `::part()`, so shadow roots must be
+    /// looked up for each node. Recomputed when the sheets change.
+    pub(crate) shadow_aware: bool,
     pub(crate) last_restyled: usize,
     /// Cascade layers in order of first declaration (spec 13.4).
     pub(crate) layers: BTreeMap<String, usize>,
@@ -272,14 +278,43 @@ impl StyleResolver {
             .unwrap_or(SheetId(u32::MAX))
     }
 
-    /// Adds a parsed stylesheet, or reports that the sheet limit is reached
-    /// (spec 20.3). Declarations that name unknown properties or have invalid
-    /// values are ignored here, since the parser already reported them. Rules
-    /// inside `@media`, `@container`, and `@layer` keep their conditions and layer.
+    /// Adds a parsed document stylesheet, or reports that the sheet limit is
+    /// reached (spec 20.3). Declarations that name unknown properties or have
+    /// invalid values are ignored here, since the parser already reported them.
+    /// Rules inside `@media`, `@container`, and `@layer` keep their conditions and
+    /// layer.
     pub fn try_add_stylesheet(
         &mut self,
         sheet: Stylesheet,
         origin: Origin,
+    ) -> Result<SheetId, StylesheetLimitExceeded> {
+        self.try_add_scoped(sheet, origin, None)
+    }
+
+    /// Adds a stylesheet scoped to the shadow root `root` (spec 9.3). Its rules
+    /// style the nodes of that shadow tree, the host through `:host`, and the
+    /// slotted elements through `::slotted()`. As with
+    /// [`StyleResolver::add_stylesheet`], the sheet is ignored when the limit is
+    /// reached.
+    pub fn add_shadow_stylesheet(
+        &mut self,
+        root: NodeId,
+        sheet: Stylesheet,
+        origin: Origin,
+    ) -> SheetId {
+        self.try_add_scoped(sheet, origin, Some(root))
+            .unwrap_or(SheetId(u32::MAX))
+    }
+
+    /// Adds a parsed stylesheet, or reports that the sheet limit is reached
+    /// (spec 20.3). Declarations that name unknown properties or have invalid
+    /// values are ignored here, since the parser already reported them. Rules
+    /// inside `@media`, `@container`, and `@layer` keep their conditions and layer.
+    pub(crate) fn try_add_scoped(
+        &mut self,
+        sheet: Stylesheet,
+        origin: Origin,
+        scope: Option<NodeId>,
     ) -> Result<SheetId, StylesheetLimitExceeded> {
         let limit = self.config.limits.max_stylesheets;
         if self.sheets.len() >= limit {
@@ -289,9 +324,23 @@ impl StyleResolver {
         self.next_sheet += 1;
         let mut rules = Vec::new();
         self.flatten(sheet.rules, &FlattenCtx::default(), &mut rules);
-        self.sheets.push(LoadedSheet { id, origin, rules });
+        self.sheets.push(LoadedSheet {
+            id,
+            origin,
+            rules,
+            scope,
+        });
         self.attr_deps = None;
         self.index = super::rule_index::RuleIndex::build(&self.sheets);
+        self.shadow_aware = self.sheets.iter().any(|s| {
+            s.scope.is_some()
+                || s.rules.iter().any(|r| {
+                    r.selectors
+                        .selectors
+                        .iter()
+                        .any(|c| matches!(c.pseudo_element, Some(PseudoElement::Part(_))))
+                })
+        });
         self.full_dirty = true;
         Ok(id)
     }
@@ -301,6 +350,15 @@ impl StyleResolver {
         self.sheets.retain(|s| s.id != id);
         self.attr_deps = None;
         self.index = super::rule_index::RuleIndex::build(&self.sheets);
+        self.shadow_aware = self.sheets.iter().any(|s| {
+            s.scope.is_some()
+                || s.rules.iter().any(|r| {
+                    r.selectors
+                        .selectors
+                        .iter()
+                        .any(|c| matches!(c.pseudo_element, Some(PseudoElement::Part(_))))
+                })
+        });
         self.full_dirty = true;
     }
 
@@ -414,6 +472,11 @@ impl StyleResolver {
         let mut out: BTreeMap<Option<PseudoElement>, Cascaded> = BTreeMap::new();
         let max_steps = self.config.limits.max_match_steps;
 
+        let node_root = if self.shadow_aware {
+            shadow_root_of(tree, node)
+        } else {
+            None
+        };
         self.index.for_each_candidate(tree, node, |c| {
             let sheet_pos = c.sheet;
             let rule_idx = c.rule;
@@ -429,16 +492,33 @@ impl StyleResolver {
             let proximity = scope_proximity(tree, node, scope);
             let sel_idx = c.selector;
             let selector = &rule.selectors.selectors[sel_idx];
+            let shadow_scope = sheet.scope;
+            let in_scope = match shadow_scope {
+                // `::slotted()` reaches light-tree elements; the matcher checks the slot.
+                Some(root) => {
+                    node_root == Some(root)
+                        || tree.shadow(root).host == Some(node)
+                        || matches!(selector.pseudo_element, Some(PseudoElement::Slotted))
+                }
+                None => {
+                    node_root.is_none()
+                        || matches!(selector.pseudo_element, Some(PseudoElement::Part(_)))
+                }
+            };
+            if !in_scope {
+                return;
+            }
             let uses_visited = rule.visited.get(sel_idx).copied().unwrap_or(false);
             if uses_visited && self.config.visited == VisitedPolicy::Disabled {
                 return;
             }
-            let mut matcher = Matcher::cached(tree, max_steps, scope, &self.siblings);
+            let mut matcher =
+                Matcher::cached(tree, max_steps, scope, &self.siblings).in_shadow(shadow_scope);
             if !matcher.matches(node, selector) {
                 return;
             }
             let cas = out
-                .entry(selector.pseudo_element.clone())
+                .entry(pseudo_key(selector))
                 .or_insert_with(Cascaded::new);
             for (decl_idx, decl) in rule.decls.iter().enumerate() {
                 if uses_visited && visited_restricted(&decl.target) {
@@ -716,9 +796,20 @@ fn selector_has_visited(selector: &ComplexSelector) -> bool {
 /// True if a selector depends on elements outside its subject: `:has()` and
 /// `:scope` do.
 fn selector_needs_ancestors(selector: &ComplexSelector) -> bool {
+    // `::part()` depends on the host, and `::slotted()` on the slot assignment, so
+    // neither can be restyled from the subject alone.
+    if matches!(
+        selector.pseudo_element,
+        Some(PseudoElement::Part(_)) | Some(PseudoElement::Slotted)
+    ) {
+        return true;
+    }
     selector.compounds.iter().any(|compound| {
         compound.simple.iter().any(|simple| match simple {
-            SimpleSelector::Has(_) | SimpleSelector::Scope => true,
+            SimpleSelector::Has(_)
+            | SimpleSelector::Scope
+            | SimpleSelector::Host(_)
+            | SimpleSelector::HostContext(_) => true,
             SimpleSelector::Not(list) | SimpleSelector::Is(list) | SimpleSelector::Where(list) => {
                 list.selectors.iter().any(selector_needs_ancestors)
             }
@@ -813,17 +904,30 @@ pub(crate) fn style_tree<T: StyleTree>(
                             rem_base: child_rem,
                         });
                     }
+                    if let Some(root) = tree.shadow_root(frame.node) {
+                        stack.push(Frame {
+                            node: root,
+                            parent: Some(style.clone()),
+                            rem_base: child_rem,
+                        });
+                    }
                 }
                 map.insert(frame.node, style);
                 styled += 1;
             }
             NodeKind::Text | NodeKind::Comment => {}
             NodeKind::Document | NodeKind::Fragment | NodeKind::Pseudo(_) => {
-                // Non-element containers do not provide inherited values.
+                // Non-element containers do not provide inherited values, except a shadow
+                // root, whose children inherit from the host (spec 9.3).
+                let inherited = if tree.shadow(frame.node).shadow_root == Some(frame.node) {
+                    frame.parent.clone()
+                } else {
+                    None
+                };
                 for &child in tree.children(frame.node).iter().rev() {
                     stack.push(Frame {
                         node: child,
-                        parent: None,
+                        parent: inherited.clone(),
                         rem_base: frame.rem_base,
                     });
                 }
@@ -1153,4 +1257,14 @@ fn css_wide_only(values: &[ComponentValue]) -> Option<CssWide> {
 pub struct StylesheetLimitExceeded {
     /// The limit that was reached.
     pub limit: usize,
+}
+
+/// The key a selector's declarations are stored under. `::part()` and
+/// `::slotted()` select real elements, so their declarations are the element's
+/// own, not a pseudo-element's.
+fn pseudo_key(selector: &ComplexSelector) -> Option<PseudoElement> {
+    match &selector.pseudo_element {
+        Some(PseudoElement::Part(_)) | Some(PseudoElement::Slotted) => None,
+        other => other.clone(),
+    }
 }

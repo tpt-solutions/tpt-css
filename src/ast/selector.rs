@@ -92,6 +92,11 @@ pub enum SimpleSelector {
     Has(Vec<RelativeSelector>),
     /// `:scope`: the scope root of the enclosing `@scope`, or the root element.
     Scope,
+    /// `:host` (`None`) or `:host(list)`: the shadow host of the sheet's shadow root
+    /// (spec 12.2 Tier 2, Shadow DOM 1 section 3).
+    Host(Option<SelectorList>),
+    /// `:host-context(list)`: the host, or an ancestor of the host, matches `list`.
+    HostContext(SelectorList),
 }
 
 /// The `An+B` family of structural selectors.

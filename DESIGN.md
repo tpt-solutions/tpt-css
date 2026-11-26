@@ -168,8 +168,8 @@ it for M1.
 
 ### Deviations and limits
 
-- `calc()` nesting uses a fixed `DEFAULT_CALC_DEPTH` (32), not a `ParseLimits`
-  field. Making it configurable is a small follow-up.
+- `calc()` nesting was once a fixed `DEFAULT_CALC_DEPTH` (32). It is now 256 for
+  recursion, and the configured `max_calc_depth` is enforced at declaration parse (see decision 13).
 - `content` accepts strings only. `attr()` and counters are not supported.
 - `background` covers only `background-color`. A declaration with an image is
   dropped. `font`, `list-style`, and `text-decoration` are not implemented.
@@ -337,8 +337,8 @@ engineering measurements, not claims about other machines (spec 21.1).
     `spec.txt` needs correcting. The code follows the draft.
 13. **Calc nesting is checked against `max_calc_depth`** where declarations enter
     the engine: at stylesheet parse (both top-level and nested rules) and after
-    `var()` substitution at computed time. The value parser's own bound stays at
-    32, so a configured value above 32 does not raise it.
+    `var()` substitution at computed time. The value parser recurses up to 256,
+    the default component nesting limit, so the configured limit is the effective one.
 14. **Stylesheet count is bounded** by `max_stylesheets`. `try_add_stylesheet`
     reports the limit; `add_stylesheet` keeps its signature and returns an id that
     matches no sheet when the limit is reached.
@@ -408,21 +408,50 @@ engineering measurements, not claims about other machines (spec 21.1).
 26. **MSRV.** The default `cargo test` passes on Rust 1.75.0, verified locally.
     Earlier this was an unverified CI claim.
 
+27. **Shadow trees use the tree contract, and the engine does not build them.** A
+    shadow root is a parentless node whose `shadow_root` is itself and whose `host`
+    is the element it is attached to. Every node inside reports that tree's `host`.
+    The host supplies `shadow_root(host)` and `assigned_slot(node)`. Those are the
+    only shadow relations the engine reads. Consequences:
+    - A shadow sheet (`add_shadow_stylesheet`) styles only its own tree, plus the
+      host through `:host`, and the slotted elements through `::slotted()`.
+    - A document sheet does not match inside a shadow tree, except `::part()`.
+    - Matching stops at a shadow root, except for a host compound (`:host`,
+      `:host()`, `:host-context()`), which may step up to the host. A document
+      selector therefore cannot match across the boundary.
+    - Top-level shadow nodes inherit from the host, in the flat tree. Slotted
+      elements inherit from their light-tree parent, not from the slot.
+    - `::part()` and `::slotted()` declarations go to the element's own style. A
+      `::part()` rule is not filed by its subject in the rule index, because its
+      subject is the part element and its key compound is the host side.
+    - `:host`, `::part()`, and `::slotted()` rules count as needing ancestors, so
+      an attribute change restyles everything. Their results depend on the host or
+      the slot, not on the element alone.
+    - Shadow support costs nothing for a document with no shadow sheet and no
+      `::part()` rule. The resolver checks `shadow_aware` before it looks up a
+      node's shadow root.
+    Limits: `:state()` is not implemented, and nothing in the engine creates shadow
+    trees. Specificity of `:host()` and `:host-context()` counts the argument.
+28. **Calc recursion uses the default component nesting limit (256).** The
+    configured `max_calc_depth` is the effective limit (decision 13), so the value
+    parser's own bound no longer caps it below the configuration.
+
 ### Still open
 
-- Scope proximity is implemented (decision 12). The order matches the Cascade 6 draft. `spec.txt` 13.3 still needs correcting.
+- Scope proximity is implemented (decision 12). The order matches the Cascade 6 draft. `spec.txt` 13.3 was corrected in a39110c.
 - Color spaces beyond the ones in decision 19 (`xyz`, `display-p3`, and the others),
   and the hue methods other than `shorter` and `longer`.
 - `StyleChange::AttributeChanged` (no name) is still conservative. Use
   `AttributeNamed` to skip attributes that no selector reads.
 - Container units across nested containers: only the nearest size container is used.
-- Shadow DOM: `::part()`, `::slotted()`, `::highlight()`, `:host`, `:host-context()`.
+- Shadow DOM: `::highlight()`, `:state()`, slot-based inheritance, and shadow trees built by
+  the engine itself (decision 27 leaves them to the host).
 - Style sharing, a dependency graph for custom properties, and a dependency index
   for selectors (the cutoff and the conservative rules are the current approach).
 - Fuzz targets and coverage-guided fuzzing. The randomized tests are seeded and
   deterministic, which is not the same thing.
 - The WPT subsuites, which need a separate checkout (spec 22.2).
-- Calc depth: the value parser keeps its own fixed bound of 32. The configured `max_calc_depth` is enforced on top of it (decision 13).
+- Calc depth: the configured `max_calc_depth` is the effective limit (decision 13). The value parser recurses up to 256, the default component nesting limit.
 - Sibling counting for `~`, `:nth-of-type()`, and `:nth-child(of S)` still walks the
   sibling list (decision 25).
 - Long-tail properties still missing: multi-value grammars (`transition`, `flex`,

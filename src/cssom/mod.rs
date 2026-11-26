@@ -452,6 +452,14 @@ pub fn serialize_selector_list(list: &SelectorList) -> String {
 }
 
 fn serialize_complex(selector: &ComplexSelector) -> String {
+    // `::slotted(compound)` keeps its argument in the compound, so it is written as
+    // the pseudo-element alone.
+    if let (Some(PseudoElement::Slotted), [compound]) =
+        (&selector.pseudo_element, selector.compounds.as_slice())
+    {
+        let argument: String = compound.simple.iter().map(serialize_simple).collect();
+        return format!("::slotted({argument})");
+    }
     let mut out = String::new();
     for (i, compound) in selector.compounds.iter().enumerate() {
         if i > 0 {
@@ -551,6 +559,11 @@ fn serialize_simple(simple: &SimpleSelector) -> String {
                 .join(", ")
         ),
         SimpleSelector::Scope => ":scope".into(),
+        SimpleSelector::Host(None) => ":host".into(),
+        SimpleSelector::Host(Some(list)) => format!(":host({})", serialize_selector_list(list)),
+        SimpleSelector::HostContext(list) => {
+            format!(":host-context({})", serialize_selector_list(list))
+        }
         SimpleSelector::Nesting => "&".into(),
     }
 }

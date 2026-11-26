@@ -149,6 +149,10 @@ fn parse_complex(
         return Err(invalid(span, "selector ends with a combinator"));
     }
 
+    if matches!(pseudo_element, Some(PseudoElement::Slotted)) && compounds.len() > 1 {
+        return Err(unsupported(span, "::slotted() must be the whole selector"));
+    }
+
     let mut selector = ComplexSelector {
         compounds,
         combinators,
@@ -226,6 +230,19 @@ fn parse_compound(
                 },
                 TokenKind::Colon => {
                     if kind_at(values, i + 1) == Some(&TokenKind::Colon) {
+                        if let Some(ComponentValue::Function(f)) = values.get(i + 2) {
+                            let (argument, element) = functional_pseudo_element(f, limits, depth)?;
+                            if !argument.is_empty() && !simple.is_empty() {
+                                return Err(invalid(
+                                    t.span,
+                                    "::slotted() must be the whole selector",
+                                ));
+                            }
+                            simple.extend(argument);
+                            pseudo = Some(element);
+                            i += 3;
+                            break;
+                        }
                         let name = match kind_at(values, i + 2) {
                             Some(TokenKind::Ident(name)) => name.clone(),
                             _ => return Err(invalid(t.span, "expected pseudo-element name")),
@@ -462,6 +479,7 @@ fn pseudo_class(name: &str, span: Span) -> Result<Vec<SimpleSelector>, Diagnosti
         "fullscreen" => one(PseudoClass::Fullscreen),
         "autofill" => one(PseudoClass::Autofill),
         "scope" => Ok(vec![SimpleSelector::Scope]),
+        "host" => Ok(vec![SimpleSelector::Host(None)]),
         "first-child" => Ok(vec![nth_plain(false, false)]),
         "last-child" => Ok(vec![nth_plain(true, false)]),
         "only-child" => Ok(vec![nth_plain(false, false), nth_plain(true, false)]),
@@ -501,6 +519,14 @@ fn functional_pseudo(
                 "is" => SimpleSelector::Is(list),
                 _ => SimpleSelector::Where(list),
             })
+        }
+        "host" => {
+            let list = parse_list_at(trim_whitespace(&f.value), limits, depth + 1)?;
+            Ok(SimpleSelector::Host(Some(list)))
+        }
+        "host-context" => {
+            let list = parse_list_at(trim_whitespace(&f.value), limits, depth + 1)?;
+            Ok(SimpleSelector::HostContext(list))
         }
         "has" => parse_has(f, limits, depth),
         "lang" => {
@@ -773,4 +799,35 @@ fn parse_has(
         return Err(invalid(f.span, ":has() needs a selector"));
     }
     Ok(SimpleSelector::Has(relatives))
+}
+
+/// Functional pseudo-elements: `::part(name)` and `::slotted(compound)`
+/// (Shadow DOM 1 sections 4 and 5). Returns the simple selectors that the
+/// pseudo-element adds to the compound, and the pseudo-element.
+fn functional_pseudo_element(
+    f: &Function,
+    limits: &ParseLimits,
+    depth: usize,
+) -> Result<(Vec<SimpleSelector>, PseudoElement), Diagnostic> {
+    match f.name.to_ascii_lowercase().as_str() {
+        "part" => match trim_whitespace(&f.value) {
+            [ComponentValue::Token(t)] => match &t.kind {
+                TokenKind::Ident(name) => Ok((Vec::new(), PseudoElement::Part(name.clone()))),
+                _ => Err(invalid(f.span, "::part() takes a part name")),
+            },
+            _ => Err(invalid(f.span, "::part() takes one part name")),
+        },
+        "slotted" => {
+            let args = trim_whitespace(&f.value);
+            let (compound, end, pseudo) = parse_compound(args, 0, limits, depth)?;
+            if end != args.len() || pseudo.is_some() {
+                return Err(invalid(f.span, "::slotted() takes one compound selector"));
+            }
+            Ok((compound.simple, PseudoElement::Slotted))
+        }
+        other => Err(unsupported(
+            f.span,
+            format!("pseudo-element ::{other}() is not supported yet"),
+        )),
+    }
 }

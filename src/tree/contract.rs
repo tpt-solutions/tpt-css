@@ -56,9 +56,24 @@ pub trait StyleTree {
         ScopeInfo::default()
     }
 
-    /// Shadow information. Defaults to none until M4.
+    /// Shadow information (spec 9.3). A shadow root is a parentless node whose
+    /// `shadow_root` is itself, and whose `host` is the element it is attached
+    /// to. Every node inside a shadow tree reports that tree's `host`. Defaults
+    /// to none, which means no shadow trees.
     fn shadow(&self, _node: NodeId) -> ShadowInfo {
         ShadowInfo::default()
+    }
+
+    /// The shadow root attached to `host`, if any. The root is styled as the
+    /// host's child in the flat tree (spec 9.3).
+    fn shadow_root(&self, _host: NodeId) -> Option<NodeId> {
+        None
+    }
+
+    /// The slot that `node` is assigned to, if the host assigns it. Used by
+    /// `::slotted()` (spec 9.3).
+    fn assigned_slot(&self, _node: NodeId) -> Option<NodeId> {
+        None
     }
 
     /// Character data of a text node. Empty for other kinds. Used by `:empty`.

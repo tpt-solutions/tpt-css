@@ -34,6 +34,14 @@ enum Key {
 /// The most selective simple selector of the subject compound: an id, then a
 /// class, then a type. Anything else (`*`, pseudo-classes alone) is unkeyed.
 fn subject_key(selector: &ComplexSelector) -> Key {
+    // A `::part()` selector matches the part element, which the subject compound
+    // does not describe, so it cannot be filed by that compound.
+    if matches!(
+        selector.pseudo_element,
+        Some(crate::selectors::PseudoElement::Part(_))
+    ) {
+        return Key::Unkeyed;
+    }
     let Some(subject) = selector.compounds.last() else {
         return Key::Unkeyed;
     };

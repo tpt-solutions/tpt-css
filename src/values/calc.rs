@@ -24,9 +24,11 @@ use super::serialize::format_number;
 use super::LengthUnit;
 use crate::syntax::{ComponentValue, TokenKind};
 
-/// The default nesting limit for math functions and parentheses. Parsers use the
-/// `max_calc_depth` of the `ParseLimits` they are given.
-pub const DEFAULT_CALC_DEPTH: usize = 32;
+/// The recursion bound for math functions and parentheses inside one value. It
+/// matches the default component nesting limit, which the tokenizer enforces. The
+/// configured `ParseLimits::max_calc_depth` is enforced where declarations enter
+/// the engine (`parse::declarations::within_math_depth` and `resolve_unparsed`).
+pub const DEFAULT_CALC_DEPTH: usize = 256;
 
 /// The rounding strategy of `round()` (spec 14.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

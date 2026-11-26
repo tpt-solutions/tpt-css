@@ -32,13 +32,21 @@ pub struct TestNode {
 }
 
 pub struct TestTree {
+    /// `(host, shadow root)` pairs.
+    pub shadows: Vec<(NodeId, NodeId)>,
+    /// `(node, slot)` pairs: the node is assigned to the slot.
+    pub slots: Vec<(NodeId, NodeId)>,
     pub nodes: Vec<TestNode>,
 }
 
 impl TestTree {
     /// Creates a tree whose root is a node of `kind`.
     pub fn new(root_kind: NodeKind) -> TestTree {
-        let mut tree = TestTree { nodes: Vec::new() };
+        let mut tree = TestTree {
+            nodes: Vec::new(),
+            shadows: Vec::new(),
+            slots: Vec::new(),
+        };
         tree.push(None, root_kind, "root");
         tree
     }
@@ -68,6 +76,19 @@ impl TestTree {
 
     pub fn root(&self) -> NodeId {
         NodeId::new(0, 0)
+    }
+
+    /// Attaches a shadow root to `host` and returns it. The root has no tree
+    /// parent, as the contract requires for a shadow root.
+    pub fn attach_shadow(&mut self, host: NodeId) -> NodeId {
+        let root = self.push(None, NodeKind::Fragment, "#shadow-root");
+        self.shadows.push((host, root));
+        root
+    }
+
+    /// Assigns `node` to `slot`, for `::slotted()`.
+    pub fn assign_slot(&mut self, node: NodeId, slot: NodeId) {
+        self.slots.push((node, slot));
     }
 
     /// Adds an element under `parent`.
@@ -141,6 +162,32 @@ impl StyleTree for TestTree {
     fn root(&self) -> NodeId {
         NodeId::new(0, 0)
     }
+    fn shadow(&self, node: NodeId) -> tpt_css::tree::ShadowInfo {
+        // The top of the node's tree decides whether it is in a shadow tree.
+        let mut top = node;
+        while let Some(parent) = self.parent(top) {
+            top = parent;
+        }
+        match self.shadows.iter().find(|(_, root)| *root == top) {
+            Some((host, root)) => tpt_css::tree::ShadowInfo {
+                host: Some(*host),
+                shadow_root: (node == *root).then_some(*root),
+            },
+            None => tpt_css::tree::ShadowInfo::default(),
+        }
+    }
+    fn shadow_root(&self, host: NodeId) -> Option<NodeId> {
+        self.shadows
+            .iter()
+            .find(|(h, _)| *h == host)
+            .map(|(_, root)| *root)
+    }
+    fn assigned_slot(&self, node: NodeId) -> Option<NodeId> {
+        self.slots
+            .iter()
+            .find(|(n, _)| *n == node)
+            .map(|(_, slot)| *slot)
+    }
     fn parent(&self, node: NodeId) -> Option<NodeId> {
         self.nodes[node.index as usize].parent
     }
@@ -194,4 +241,16 @@ pub fn style_with_env(css: &str, tree: &TestTree, env: &Environment) -> StyleMap
 /// The computed style of `node`, panicking if the node was not styled.
 pub fn style_of(map: &StyleMap, node: NodeId) -> &ComputedStyle {
     map.get(node).expect("node should have a computed style")
+}
+
+impl TestTree {
+    /// The shadow root attached to `host`. Panics if there is none, since a test
+    /// that asks for one has built it.
+    pub fn shadow_root_for(&self, host: NodeId) -> NodeId {
+        self.shadows
+            .iter()
+            .find(|(h, _)| *h == host)
+            .map(|(_, root)| *root)
+            .expect("the host has a shadow root")
+    }
 }

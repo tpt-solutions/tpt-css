@@ -26,7 +26,9 @@ use crate::ast::selector::{
     AttributeOperator, Combinator, ComplexSelector, CompoundSelector, NthSelector, PseudoClass,
     RelativeSelector, SelectorList, SimpleSelector,
 };
+use crate::selectors::pseudo::PseudoElement;
 use crate::selectors::specificity::Specificity;
+use crate::tree::scope::shadow_root_of;
 use crate::tree::{Direction, NodeId, NodeKind, StateBits, StyleTree};
 
 /// Returns the highest specificity among the members of `list` that match
@@ -63,6 +65,7 @@ pub fn matches_complex<T: StyleTree>(
         budget: *budget,
         scope: None,
         siblings: None,
+        shadow: None,
     };
     let result = matcher.matches(node, selector);
     *budget = matcher.budget;
@@ -75,6 +78,8 @@ pub struct Matcher<'a, T: StyleTree> {
     budget: usize,
     scope: Option<NodeId>,
     siblings: Option<&'a SiblingCache>,
+    /// The shadow root of the sheet being matched, if the sheet is scoped (spec 9.3).
+    shadow: Option<NodeId>,
 }
 
 /// The element children of one parent, with the position of each.
@@ -138,6 +143,7 @@ impl<'a, T: StyleTree> Matcher<'a, T> {
             budget: max_steps,
             scope,
             siblings: None,
+            shadow: None,
         }
     }
 
@@ -153,14 +159,86 @@ impl<'a, T: StyleTree> Matcher<'a, T> {
             budget: max_steps,
             scope,
             siblings: Some(siblings),
+            shadow: None,
         }
     }
 
     /// True if `node` matches the complex selector's element part.
     pub fn matches(&mut self, node: NodeId, selector: &ComplexSelector) -> bool {
+        match &selector.pseudo_element {
+            Some(PseudoElement::Part(name)) => return self.matches_part(node, selector, name),
+            Some(PseudoElement::Slotted) if !self.is_slotted(node) => return false,
+            _ => {}
+        }
         match selector.compounds.len() {
             0 => false,
             n => self.match_from(node, selector, n - 1, None),
+        }
+    }
+
+    /// `::part(name)` (Shadow DOM 1 section 4): `node` has the part, and the rest
+    /// of the selector matches its shadow host.
+    fn matches_part(&mut self, node: NodeId, selector: &ComplexSelector, name: &str) -> bool {
+        let has_part = self
+            .tree
+            .attributes(node)
+            .get("part")
+            .is_some_and(|parts| parts.split_ascii_whitespace().any(|p| p == name));
+        if !has_part {
+            return false;
+        }
+        let Some(root) = shadow_root_of(self.tree, node) else {
+            return false;
+        };
+        let Some(host) = self.tree.shadow(root).host else {
+            return false;
+        };
+        let Some(count) = selector.compounds.len().checked_sub(1) else {
+            return false;
+        };
+        // The host side is matched in the document, so the sheet's shadow root
+        // does not apply to it.
+        let saved = self.shadow.take();
+        let matched = self.match_from(host, selector, count, None);
+        self.shadow = saved;
+        matched
+    }
+
+    /// `::slotted()` (Shadow DOM 1 section 5): `node` is assigned to a slot in the
+    /// shadow tree that this sheet is scoped to.
+    fn is_slotted(&self, node: NodeId) -> bool {
+        match (self.shadow, self.tree.assigned_slot(node)) {
+            (Some(root), Some(slot)) => shadow_root_of(self.tree, slot) == Some(root),
+            _ => false,
+        }
+    }
+
+    /// Sets the shadow root of the sheet being matched. Document sheets pass `None`.
+    pub(crate) fn in_shadow(mut self, root: Option<NodeId>) -> Self {
+        self.shadow = root;
+        self
+    }
+
+    /// The node that a compound at a combinator may be matched against, when
+    /// stepping up from `from`. Stepping from a shadow root goes to its host, and
+    /// only for a host compound (`:host`, `:host()`, `:host-context()`), so a
+    /// document selector cannot match across a shadow boundary (spec 9.3).
+    fn upward(&self, from: NodeId, compound: &CompoundSelector) -> Option<NodeId> {
+        let parent = self.tree.parent(from)?;
+        // A shadow root is parentless, so only a parentless node can be one.
+        if self.tree.parent(parent).is_some()
+            || self.tree.shadow(parent).shadow_root != Some(parent)
+        {
+            return Some(parent);
+        }
+        let host_compound = compound
+            .simple
+            .iter()
+            .any(|s| matches!(s, SimpleSelector::Host(_) | SimpleSelector::HostContext(_)));
+        if self.shadow == Some(parent) && host_compound {
+            self.tree.shadow(parent).host
+        } else {
+            None
         }
     }
 
@@ -202,12 +280,13 @@ impl<'a, T: StyleTree> Matcher<'a, T> {
             };
         }
         match selector.combinators[idx - 1] {
-            Combinator::Child => match self.tree.parent(node) {
+            Combinator::Child => match self.upward(node, &selector.compounds[idx - 1]) {
                 Some(parent) => self.match_from(parent, selector, idx - 1, anchor),
                 None => false,
             },
             Combinator::Descendant => {
-                let mut current = self.tree.parent(node);
+                let compound = &selector.compounds[idx - 1];
+                let mut current = self.upward(node, compound);
                 while let Some(ancestor) = current {
                     if !self.charge() {
                         return false;
@@ -215,7 +294,7 @@ impl<'a, T: StyleTree> Matcher<'a, T> {
                     if self.match_from(ancestor, selector, idx - 1, anchor) {
                         return true;
                     }
-                    current = self.tree.parent(ancestor);
+                    current = self.upward(ancestor, compound);
                 }
                 false
             }
@@ -307,6 +386,29 @@ impl<'a, T: StyleTree> Matcher<'a, T> {
         self.matches(node, selector)
     }
 
+    /// The host of the sheet's shadow root, if the sheet is scoped.
+    fn sheet_host(&self) -> Option<NodeId> {
+        self.shadow.and_then(|root| self.tree.shadow(root).host)
+    }
+
+    /// True if `node` is the host of the shadow root this sheet is scoped to.
+    /// Document sheets have no host, so `:host` never matches for them.
+    fn is_host(&self, node: NodeId) -> bool {
+        self.sheet_host() == Some(node)
+    }
+
+    /// True if `node` or one of its ancestors in the document matches `list`.
+    fn host_or_ancestor_matches(&mut self, node: NodeId, list: &SelectorList) -> bool {
+        let mut current = Some(node);
+        while let Some(candidate) = current {
+            if self.is_element(candidate) && self.list_matches(candidate, list) {
+                return true;
+            }
+            current = self.tree.parent(candidate);
+        }
+        false
+    }
+
     fn simple_matches(&mut self, node: NodeId, simple: &SimpleSelector) -> bool {
         match simple {
             SimpleSelector::Universal => true,
@@ -325,6 +427,15 @@ impl<'a, T: StyleTree> Matcher<'a, T> {
             },
             SimpleSelector::PseudoClass(pseudo) => self.pseudo_class_matches(node, *pseudo),
             SimpleSelector::Nth(nth) => self.nth_matches(node, nth),
+            SimpleSelector::Host(argument) => {
+                self.is_host(node)
+                    && argument
+                        .as_ref()
+                        .map_or(true, |l| self.list_matches(node, l))
+            }
+            SimpleSelector::HostContext(list) => {
+                self.is_host(node) && self.host_or_ancestor_matches(node, list)
+            }
             SimpleSelector::Not(list) => !self.list_matches(node, list),
             SimpleSelector::Is(list) | SimpleSelector::Where(list) => self.list_matches(node, list),
             SimpleSelector::Lang(tag) => language_matches(self.tree, node, tag),
