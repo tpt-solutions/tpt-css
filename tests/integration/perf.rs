@@ -229,3 +229,28 @@ fn resolve_split_between_computation_and_matching() {
         full.saturating_sub(empty)
     );
 }
+
+/// Cost of cloning one computed style, which `style_tree` does once per element
+/// to hand the parent's style to each child (DESIGN.md decision 35).
+#[test]
+#[ignore]
+fn computed_style_clone_cost() {
+    let mut t = TestTree::new(NodeKind::Element);
+    let root = t.root();
+    t.nodes[0].name.local = "root".into();
+    let div = t.element(root, "div");
+    let mut resolver = StyleResolver::new(ResolverConfig::default());
+    resolver.add_stylesheet(
+        parse_sheet("div { margin-left: 1px }").stylesheet,
+        Origin::Author,
+    );
+    let map = resolver.resolve(&t, &Environment::default()).clone();
+    let style = map.get(div).expect("styled").clone();
+    let rounds = 100_000;
+    let start = Instant::now();
+    for _ in 0..rounds {
+        std::hint::black_box(style.clone());
+    }
+    let per = start.elapsed() / rounds;
+    println!("one computed-style clone: {per:?}");
+}
