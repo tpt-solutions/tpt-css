@@ -63,6 +63,17 @@ pub enum LengthUnit {
     Cqmax,
 }
 
+/// One item of a `content` list that mixes strings with `attr()` (CSS
+/// Generated Content 3, `attr()` with a plain name).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ContentItem {
+    /// A quoted string.
+    Text(String),
+    /// `attr(name)`: the value of the element's attribute `name`, read at
+    /// computed-value time. A missing attribute contributes the empty string.
+    Attr(String),
+}
+
 /// A typed property value, used for both specified and computed values.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -88,6 +99,9 @@ pub enum Value {
     FontFamily(Vec<String>),
     /// The string list of `content`.
     Strings(Vec<String>),
+    /// A `content` list with at least one `attr()`. Computed values replace
+    /// it with [`Value::Strings`].
+    Content(Vec<ContentItem>),
     /// A `light-dark(light, dark)` color pair, resolved at computed-value time
     /// from the color scheme (CSS Color 5).
     LightDark(Color, Color),

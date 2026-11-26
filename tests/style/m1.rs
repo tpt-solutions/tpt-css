@@ -382,3 +382,34 @@ fn unicode_bidi_is_not_inherited() {
     let map = style_with("root { unicode-bidi: embed }", &t);
     assert_eq!(value(&map, child, "unicode-bidi"), Value::Keyword("normal"));
 }
+
+#[test]
+fn content_attr_reads_the_element_attribute_at_computed_time() {
+    let (mut t, _, child) = chain();
+    t.set_attr(child, "title", "hi");
+    let map = style_with(
+        "child::before { content: \"[\" attr(TITLE) \"]\" } child::after { content: attr(missing) }",
+        &t,
+    );
+    let before = map
+        .get_pseudo(child, &PseudoElement::Before)
+        .expect("::before is generated");
+    assert_eq!(
+        *before.raw(prop("content")),
+        Value::Strings(vec!["[".to_string(), "hi".to_string(), "]".to_string()])
+    );
+    let after = map
+        .get_pseudo(child, &PseudoElement::After)
+        .expect("a missing attribute still generates the box");
+    assert_eq!(
+        *after.raw(prop("content")),
+        Value::Strings(vec![String::new()])
+    );
+}
+
+#[test]
+fn content_attr_with_a_type_or_fallback_is_invalid() {
+    let (t, _, child) = chain();
+    let map = style_with("child::before { content: attr(title, \"x\") }", &t);
+    assert!(map.get_pseudo(child, &PseudoElement::Before).is_none());
+}

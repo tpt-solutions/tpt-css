@@ -1024,6 +1024,38 @@ fn text_decoration_line_stores_the_set_in_spec_order() {
 }
 
 #[test]
+fn text_decoration_thickness_grammar_and_shorthand_reset() {
+    let th = |css: &str| longhands_of(css, &["text-decoration-thickness"])[0].clone();
+    assert_eq!(
+        th("child { text-decoration-thickness: 2px }"),
+        Value::px(2.0)
+    );
+    assert_eq!(
+        th("child { text-decoration-thickness: 10% }"),
+        Value::Percentage(10.0)
+    );
+    assert_eq!(
+        th("child { text-decoration-thickness: from-font }"),
+        Value::Keyword("from-font")
+    );
+    // A negative thickness is invalid, so the declaration is dropped.
+    assert_eq!(
+        th("child { text-decoration-thickness: -1px }"),
+        Value::Keyword("auto")
+    );
+    // The shorthand takes the thickness as one of its parts.
+    assert_eq!(
+        th("child { text-decoration: underline 3px red }"),
+        Value::px(3.0)
+    );
+    // The shorthand resets the thickness it does not name.
+    assert_eq!(
+        th("child { text-decoration-thickness: 5px; text-decoration: underline }"),
+        Value::Keyword("auto")
+    );
+}
+
+#[test]
 fn text_decoration_shorthand_matches_its_longhands() {
     let props = [
         "text-decoration-line",

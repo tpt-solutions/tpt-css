@@ -902,6 +902,17 @@ pub const PROPERTIES: &[PropertySpec] = &[
         },
         spec_url: CSS_BACKGROUNDS,
     },
+    // 84
+    PropertySpec {
+        name: "text-decoration-thickness",
+        inherited: false,
+        initial: Initial::Keyword("auto"),
+        grammar: Grammar::LengthPercentage {
+            non_negative: true,
+            keywords: &["auto", "from-font"],
+        },
+        spec_url: CSS_TEXT_DECOR,
+    },
 ];
 
 const fn offset(name: &'static str) -> PropertySpec {

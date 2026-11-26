@@ -12,7 +12,7 @@ use super::registry::{Grammar, PropertySpec};
 use crate::syntax::{trim_whitespace, ComponentValue, NumericType, TokenKind};
 use crate::values::color::parse_color;
 use crate::values::length::parse_length_percentage;
-use crate::values::Value;
+use crate::values::{ContentItem, Value};
 
 /// CSS-wide keywords (spec 13.8).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,7 +100,7 @@ pub fn parse_property_value(
             parse_length_percentage(values, false, true)
                 .filter(|v| matches!(v, Value::Length { .. }))
         }),
-        Grammar::Content => keyword(values, &["normal", "none"]).or_else(|| parse_strings(values)),
+        Grammar::Content => keyword(values, &["normal", "none"]).or_else(|| parse_content(values)),
         Grammar::Opacity => number_or_percent(values).map(|v| Value::Number(v.clamp(0.0, 1.0))),
         Grammar::Integer { keywords } => {
             keyword(values, keywords).or_else(|| integer(values).map(|n| Value::Number(n as f64)))
@@ -204,19 +204,51 @@ fn parse_font_family(values: &[ComponentValue]) -> Option<Value> {
 }
 
 /// One or more strings, separated by whitespace (the `content` grammar).
-fn parse_strings(values: &[ComponentValue]) -> Option<Value> {
+fn parse_content(values: &[ComponentValue]) -> Option<Value> {
     let mut out = Vec::new();
+    let mut has_attr = false;
     for v in values {
         match v {
             ComponentValue::Token(t) => match &t.kind {
-                TokenKind::String(s) => out.push(s.clone()),
+                TokenKind::String(s) => out.push(ContentItem::Text(s.clone())),
                 TokenKind::Whitespace => {}
                 _ => return None,
             },
+            ComponentValue::Function(f) if f.name.eq_ignore_ascii_case("attr") => {
+                let name = parse_attr_name(&f.value)?;
+                has_attr = true;
+                out.push(ContentItem::Attr(name));
+            }
             _ => return None,
         }
     }
-    (!out.is_empty()).then_some(Value::Strings(out))
+    if out.is_empty() {
+        return None;
+    }
+    if has_attr {
+        return Some(Value::Content(out));
+    }
+    let strings = out
+        .into_iter()
+        .filter_map(|item| match item {
+            ContentItem::Text(s) => Some(s),
+            ContentItem::Attr(_) => None,
+        })
+        .collect();
+    Some(Value::Strings(strings))
+}
+
+/// The name in `attr(name)`. Only a plain identifier is accepted; the type
+/// and fallback forms are not supported. Names are lowercased, since HTML
+/// attribute names are case-insensitive.
+fn parse_attr_name(values: &[ComponentValue]) -> Option<String> {
+    match trim_whitespace(values) {
+        [ComponentValue::Token(t)] => match &t.kind {
+            TokenKind::Ident(name) => Some(name.to_ascii_lowercase()),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// `light-dark(light, dark)`: each argument is a color. The choice is made at

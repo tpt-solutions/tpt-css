@@ -182,6 +182,7 @@ pub const SHORTHANDS: &[ShorthandSpec] = &[
             "text-decoration-line",
             "text-decoration-style",
             "text-decoration-color",
+            "text-decoration-thickness",
         ],
         expand: text_decoration,
     },
@@ -353,6 +354,7 @@ fn text_decoration(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> 
     let mut saw_none = false;
     let mut style = None;
     let mut color = None;
+    let mut thickness = None;
     for part in &parts {
         if let [ComponentValue::Token(t)] = part {
             if let TokenKind::Ident(word) = &t.kind {
@@ -384,6 +386,12 @@ fn text_decoration(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> 
                 continue;
             }
         }
+        if thickness.is_none() {
+            if let Ok(v) = parse_as("text-decoration-thickness", part) {
+                thickness = Some(v);
+                continue;
+            }
+        }
         return Err(InvalidValue);
     }
     if saw_none && bits != 0 {
@@ -406,6 +414,10 @@ fn text_decoration(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> 
         (
             "text-decoration-color",
             color.unwrap_or_else(|| initial_value("text-decoration-color")),
+        ),
+        (
+            "text-decoration-thickness",
+            thickness.unwrap_or_else(|| initial_value("text-decoration-thickness")),
         ),
     ])
 }
