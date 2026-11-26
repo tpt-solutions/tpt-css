@@ -97,6 +97,9 @@ pub enum SimpleSelector {
     Host(Option<SelectorList>),
     /// `:host-context(list)`: the host, or an ancestor of the host, matches `list`.
     HostContext(SelectorList),
+    /// `:state(name)`: the element has the author-defined custom state `name` (CSS
+    /// Custom State Pseudo-class). Names are case-sensitive.
+    CustomState(String),
 }
 
 /// The `An+B` family of structural selectors.

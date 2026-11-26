@@ -864,7 +864,7 @@ pub(crate) fn style_tree<T: StyleTree>(
                 let element_cas = targets.remove(&None).unwrap_or_else(Cascaded::new);
                 let style = compute_style(
                     &element_cas,
-                    frame.parent.as_ref(),
+                    inherited_parent(tree, frame.node, frame.parent.as_ref(), map).as_ref(),
                     root_fs,
                     env,
                     limits,
@@ -942,9 +942,10 @@ pub(crate) fn style_tree<T: StyleTree>(
 /// `::backdrop`, `::file-selector-button`, CSS Pseudo-Elements 4).
 fn is_generated(pseudo: &PseudoElement, style: &ComputedStyle) -> bool {
     match pseudo {
-        PseudoElement::Selection | PseudoElement::Backdrop | PseudoElement::FileSelectorButton => {
-            true
-        }
+        PseudoElement::Selection
+        | PseudoElement::Backdrop
+        | PseudoElement::FileSelectorButton
+        | PseudoElement::Highlight(_) => true,
         _ => !matches!(
             style.raw(ids::CONTENT),
             Value::Keyword("none") | Value::Keyword("normal")
@@ -1266,5 +1267,20 @@ fn pseudo_key(selector: &ComplexSelector) -> Option<PseudoElement> {
     match &selector.pseudo_element {
         Some(PseudoElement::Part(_)) | Some(PseudoElement::Slotted) => None,
         other => other.clone(),
+    }
+}
+
+/// The style a node inherits from. A slotted element inherits from its slot, which
+/// is styled before it because a shadow root is processed before the light
+/// children of its host (spec 9.3). Otherwise the flat-tree parent is used.
+fn inherited_parent<T: StyleTree>(
+    tree: &T,
+    node: NodeId,
+    pushed: Option<&ComputedStyle>,
+    map: &StyleMap,
+) -> Option<ComputedStyle> {
+    match tree.assigned_slot(node).and_then(|slot| map.get(slot)) {
+        Some(slot_style) => Some(slot_style.clone()),
+        None => pushed.cloned(),
     }
 }

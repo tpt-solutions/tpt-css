@@ -63,7 +63,9 @@ impl Specificity {
                 }
             }
             SimpleSelector::Not(list) | SimpleSelector::Is(list) => Specificity::of_list(list),
-            SimpleSelector::Host(None) => Specificity { a: 0, b: 1, c: 0 },
+            SimpleSelector::Host(None) | SimpleSelector::CustomState(_) => {
+                Specificity { a: 0, b: 1, c: 0 }
+            }
             SimpleSelector::Host(Some(list)) | SimpleSelector::HostContext(list) => {
                 Specificity { a: 0, b: 1, c: 0 }.add(Specificity::of_list(list))
             }

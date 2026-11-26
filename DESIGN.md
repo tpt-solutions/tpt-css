@@ -430,11 +430,22 @@ engineering measurements, not claims about other machines (spec 21.1).
     - Shadow support costs nothing for a document with no shadow sheet and no
       `::part()` rule. The resolver checks `shadow_aware` before it looks up a
       node's shadow root.
-    Limits: `:state()` is not implemented, and nothing in the engine creates shadow
+    Limits: nothing in the engine creates shadow
     trees. Specificity of `:host()` and `:host-context()` counts the argument.
 28. **Calc recursion uses the default component nesting limit (256).** The
     configured `max_calc_depth` is the effective limit (decision 13), so the value
     parser's own bound no longer caps it below the configuration.
+
+29. **Slotted elements inherit from their slot.** A shadow root is pushed last, so
+    it is processed before the host's light children, and a slot's style is in the
+    map when a slotted element is reached. Restyle cannot see which elements a slot
+    feeds, so any change inside a shadow tree restyles everything. That is the
+    conservative choice. The alternative is an index from slots to assigned nodes.
+30. **Smaller additions.** `:state(name)` matches the custom states the host reports,
+    case-sensitively. `::highlight(name)` is stored under its name, and its styles
+    are always kept, like `::selection`. `border-radius` takes one to four lengths in
+    corner order (top-left, top-right, bottom-right, bottom-left), with the same
+    expansion as the box shorthands. The elliptical `/` form is not supported.
 
 ### Still open
 
@@ -444,7 +455,7 @@ engineering measurements, not claims about other machines (spec 21.1).
 - `StyleChange::AttributeChanged` (no name) is still conservative. Use
   `AttributeNamed` to skip attributes that no selector reads.
 - Container units across nested containers: only the nearest size container is used.
-- Shadow DOM: `::highlight()`, `:state()`, slot-based inheritance, and shadow trees built by
+- Shadow DOM: shadow trees built by
   the engine itself (decision 27 leaves them to the host).
 - Style sharing, a dependency graph for custom properties, and a dependency index
   for selectors (the cutoff and the conservative rules are the current approach).

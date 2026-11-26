@@ -71,6 +71,11 @@ impl StyleResolver {
 
     /// Marks one element dirty, and whatever its selectors can reach (spec 12.4).
     fn invalidate_element<T: StyleTree>(&mut self, tree: &T, node: NodeId) {
+        // A change inside a shadow tree can change a slot whose assigned elements
+        // inherit from it, and those are not reached from the change. Restyle all.
+        if crate::tree::scope::shadow_root_of(tree, node).is_some() {
+            self.full_dirty = true;
+        }
         self.dirty.insert(node);
         let structural = self
             .sheets

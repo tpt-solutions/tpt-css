@@ -249,7 +249,7 @@ fn parse_value(prop: &str, css_value: &str) -> Option<Value> {
 
 #[test]
 fn registry_has_37_properties_and_ids_match_their_rows() {
-    assert_eq!(PROPERTIES.len(), 80);
+    assert_eq!(PROPERTIES.len(), 84);
     assert_eq!(PROPERTIES[ids::DISPLAY.index()].name, "display");
     assert_eq!(PROPERTIES[ids::COLOR.index()].name, "color");
     assert_eq!(PROPERTIES[ids::FONT_FAMILY.index()].name, "font-family");

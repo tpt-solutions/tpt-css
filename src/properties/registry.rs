@@ -858,6 +858,50 @@ pub const PROPERTIES: &[PropertySpec] = &[
         },
         spec_url: CSS_TEXT,
     },
+    // 80
+    PropertySpec {
+        name: "border-top-left-radius",
+        inherited: false,
+        initial: Initial::Px(0.0),
+        grammar: Grammar::LengthPercentage {
+            non_negative: true,
+            keywords: NO_KEYWORDS,
+        },
+        spec_url: CSS_BACKGROUNDS,
+    },
+    // 81
+    PropertySpec {
+        name: "border-top-right-radius",
+        inherited: false,
+        initial: Initial::Px(0.0),
+        grammar: Grammar::LengthPercentage {
+            non_negative: true,
+            keywords: NO_KEYWORDS,
+        },
+        spec_url: CSS_BACKGROUNDS,
+    },
+    // 82
+    PropertySpec {
+        name: "border-bottom-right-radius",
+        inherited: false,
+        initial: Initial::Px(0.0),
+        grammar: Grammar::LengthPercentage {
+            non_negative: true,
+            keywords: NO_KEYWORDS,
+        },
+        spec_url: CSS_BACKGROUNDS,
+    },
+    // 83
+    PropertySpec {
+        name: "border-bottom-left-radius",
+        inherited: false,
+        initial: Initial::Px(0.0),
+        grammar: Grammar::LengthPercentage {
+            non_negative: true,
+            keywords: NO_KEYWORDS,
+        },
+        spec_url: CSS_BACKGROUNDS,
+    },
 ];
 
 const fn offset(name: &'static str) -> PropertySpec {

@@ -436,6 +436,7 @@ impl<'a, T: StyleTree> Matcher<'a, T> {
             SimpleSelector::HostContext(list) => {
                 self.is_host(node) && self.host_or_ancestor_matches(node, list)
             }
+            SimpleSelector::CustomState(name) => self.tree.state(node).custom.contains(name),
             SimpleSelector::Not(list) => !self.list_matches(node, list),
             SimpleSelector::Is(list) | SimpleSelector::Where(list) => self.list_matches(node, list),
             SimpleSelector::Lang(tag) => language_matches(self.tree, node, tag),

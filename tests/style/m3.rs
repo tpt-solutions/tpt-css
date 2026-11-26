@@ -1276,3 +1276,64 @@ fn a_host_attribute_change_restyles_host_dependent_rules() {
     let full = styled("", ":host(.on) span { color: green }", &s);
     assert_eq!(restyled, full);
 }
+
+#[test]
+fn state_selector_matches_custom_states_case_sensitively() {
+    let (mut t, _, child) = chain();
+    let map = style_with("child:state(loading) { color: red }", &t);
+    assert_eq!(style_of(&map, child).color(), Color::BLACK);
+    t.nodes[child.index as usize].state.custom.insert("loading");
+    let map = style_with("child:state(loading) { color: red }", &t);
+    assert_eq!(style_of(&map, child).color(), Color::rgb8(255, 0, 0));
+    let map = style_with("child:state(Loading) { color: red }", &t);
+    assert_eq!(style_of(&map, child).color(), Color::BLACK);
+}
+
+#[test]
+fn slotted_elements_inherit_from_the_slot_and_others_from_the_host() {
+    let s = shadowed();
+    let map = styled(".card { color: #ff0000 }", "slot { color: #0000ff }", &s);
+    assert_eq!(style_of(&map, s.light).color(), Color::rgb8(0, 0, 255));
+    assert_eq!(style_of(&map, s.unslotted).color(), Color::rgb8(255, 0, 0));
+}
+
+#[test]
+fn highlight_pseudo_element_is_stored_under_its_name() {
+    let (t, _, child) = chain();
+    let mut resolver = StyleResolver::new(ResolverConfig::default());
+    resolver.add_stylesheet(
+        parse_sheet("child::highlight(spell) { color: red }").stylesheet,
+        Origin::Author,
+    );
+    let map = resolver.resolve(&t, &Environment::default()).clone();
+    let pseudo = map
+        .get_pseudo(
+            child,
+            &tpt_css::selectors::PseudoElement::Highlight("spell".into()),
+        )
+        .expect("the highlight style is stored");
+    assert_eq!(pseudo.color(), Color::rgb8(255, 0, 0));
+    assert_eq!(style_of(&map, child).color(), Color::BLACK);
+}
+
+#[test]
+fn border_radius_expands_to_the_four_corners_in_clockwise_order() {
+    let corners = [
+        "border-top-left-radius",
+        "border-top-right-radius",
+        "border-bottom-right-radius",
+        "border-bottom-left-radius",
+    ];
+    assert_eq!(
+        longhands_of("child { border-radius: 1px 2px 3px }", &corners),
+        longhands_of(
+            "child { border-top-left-radius: 1px; border-top-right-radius: 2px; border-bottom-right-radius: 3px; border-bottom-left-radius: 2px }",
+            &corners
+        )
+    );
+    // The elliptical `/` form is not supported, so the declaration is dropped.
+    assert_eq!(
+        longhands_of("child { border-radius: 1px / 2px }", &corners),
+        longhands_of("child { }", &corners)
+    );
+}

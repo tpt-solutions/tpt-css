@@ -61,6 +61,17 @@ const BORDER_COLOR: [&str; 4] = [
     "border-left-color",
 ];
 
+const RADIUS: [&str; 4] = [
+    "border-top-left-radius",
+    "border-top-right-radius",
+    "border-bottom-right-radius",
+    "border-bottom-left-radius",
+];
+
+fn radius_expand(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> {
+    sides(values, RADIUS)
+}
+
 /// Every shorthand supported in M1. A shorthand's index in this table is the
 /// id stored in [`SpecifiedValue::Unparsed`].
 pub const SHORTHANDS: &[ShorthandSpec] = &[
@@ -143,6 +154,11 @@ pub const SHORTHANDS: &[ShorthandSpec] = &[
         name: "background",
         longhands: &["background-color"],
         expand: background,
+    },
+    ShorthandSpec {
+        name: "border-radius",
+        longhands: &RADIUS,
+        expand: radius_expand,
     },
     ShorthandSpec {
         name: "font",

@@ -559,6 +559,7 @@ fn serialize_simple(simple: &SimpleSelector) -> String {
                 .join(", ")
         ),
         SimpleSelector::Scope => ":scope".into(),
+        SimpleSelector::CustomState(name) => format!(":state({name})"),
         SimpleSelector::Host(None) => ":host".into(),
         SimpleSelector::Host(Some(list)) => format!(":host({})", serialize_selector_list(list)),
         SimpleSelector::HostContext(list) => {

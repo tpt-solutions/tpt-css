@@ -528,6 +528,13 @@ fn functional_pseudo(
             let list = parse_list_at(trim_whitespace(&f.value), limits, depth + 1)?;
             Ok(SimpleSelector::HostContext(list))
         }
+        "state" => match trim_whitespace(&f.value) {
+            [ComponentValue::Token(t)] => match &t.kind {
+                TokenKind::Ident(name) => Ok(SimpleSelector::CustomState(name.clone())),
+                _ => Err(invalid(f.span, ":state() takes a state name")),
+            },
+            _ => Err(invalid(f.span, ":state() takes one state name")),
+        },
         "has" => parse_has(f, limits, depth),
         "lang" => {
             let args = trim_whitespace(&f.value);
@@ -825,6 +832,13 @@ fn functional_pseudo_element(
             }
             Ok((compound.simple, PseudoElement::Slotted))
         }
+        "highlight" => match trim_whitespace(&f.value) {
+            [ComponentValue::Token(t)] => match &t.kind {
+                TokenKind::Ident(name) => Ok((Vec::new(), PseudoElement::Highlight(name.clone()))),
+                _ => Err(invalid(f.span, "::highlight() takes a highlight name")),
+            },
+            _ => Err(invalid(f.span, "::highlight() takes one highlight name")),
+        },
         other => Err(unsupported(
             f.span,
             format!("pseudo-element ::{other}() is not supported yet"),
