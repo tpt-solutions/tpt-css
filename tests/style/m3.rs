@@ -1056,6 +1056,37 @@ fn text_decoration_thickness_grammar_and_shorthand_reset() {
 }
 
 #[test]
+fn font_stretch_keywords_percentages_and_the_font_shorthand() {
+    let stretch = |css: &str| longhands_of(css, &["font-stretch"])[0].clone();
+    assert_eq!(
+        stretch("child { font-stretch: condensed }"),
+        Value::Keyword("condensed")
+    );
+    assert_eq!(
+        stretch("child { font-stretch: 75% }"),
+        Value::Percentage(75.0)
+    );
+    // A negative percentage and an unknown keyword are invalid.
+    assert_eq!(
+        stretch("child { font-stretch: -10% }"),
+        Value::Keyword("normal")
+    );
+    assert_eq!(
+        stretch("child { font-stretch: wide }"),
+        Value::Keyword("normal")
+    );
+    // The font shorthand sets stretch when it names it, and resets it otherwise.
+    assert_eq!(
+        stretch("child { font: condensed bold 12px serif }"),
+        Value::Keyword("condensed")
+    );
+    assert_eq!(
+        stretch("child { font-stretch: expanded; font: 12px serif }"),
+        Value::Keyword("normal")
+    );
+}
+
+#[test]
 fn text_decoration_skip_ink_longhand_and_shorthand() {
     let ink = |css: &str| longhands_of(css, &["text-decoration-skip-ink"])[0].clone();
     assert_eq!(

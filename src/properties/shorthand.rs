@@ -9,11 +9,12 @@
 //!
 //! M1 shorthands: `margin`, `padding`, `border`, `border-width`,
 //! `border-style`, `border-color`, the four `border-<side>` shorthands, and
-//! `background`, which covers only `background-color`. `font` and `list-style`
-//! are implemented, without `font-variant`, `font-stretch`, system fonts, or
-//! list-style images other than `none`. `text-decoration` is not implemented,
-//! and neither is `background` with images; a
-//! declaration that uses them is dropped.
+//! `background`, which covers only `background-color`. `font`, `list-style`,
+//! `text-decoration` (line, style, color, thickness, skip-ink), and
+//! `border-radius` (including the `/` form) are implemented. `font` has no
+//! `font-variant`, no system fonts, and `list-style` has no
+//! images other than `none`. `background` with images is not implemented; a
+//! declaration that uses it is dropped.
 
 use super::parse::{parse_property_value, CssWide, InvalidValue, SpecifiedValue};
 use super::registry::{lookup, spec, Initial};
@@ -193,6 +194,7 @@ pub const SHORTHANDS: &[ShorthandSpec] = &[
         longhands: &[
             "font-style",
             "font-weight",
+            "font-stretch",
             "font-size",
             "line-height",
             "font-family",
@@ -217,13 +219,13 @@ pub const SHORTHANDS: &[ShorthandSpec] = &[
     },
 ];
 
-/// `font: [style] [weight] size [/ line-height] family` (CSS Fonts 4 section 4.3).
+/// `font: [style] [weight] [stretch] size [/ line-height] family` (CSS Fonts 4
+/// section 4.3).
 ///
-/// Only `font-style`, `font-weight`, `font-size`, `line-height`, and
-/// `font-family` are registered, so `font-variant` and `font-stretch` are not
-/// accepted here, and the system font keywords (`caption`, `menu`, and the
-/// others) are not supported. Omitted style and weight take their initial
-/// value, and an omitted line height resets to `normal`, as the shorthand requires.
+/// `font-variant` is not registered, so it is not accepted here, and the system
+/// font keywords (`caption`, `menu`, and the others) are not supported. Omitted
+/// style, weight, and stretch take their initial values, and an omitted line
+/// height resets to `normal`, as the shorthand requires.
 fn font(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> {
     let values = crate::syntax::trim_whitespace(values);
     let items: Vec<(usize, &ComponentValue)> = values
@@ -233,8 +235,9 @@ fn font(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> {
         .collect();
     let mut style = None;
     let mut weight = None;
+    let mut stretch = None;
     let mut k = 0;
-    // Style and weight come before the size, in either order.
+    // Style, weight, and stretch come before the size, in any order.
     let size = loop {
         let item = items.get(k).ok_or(InvalidValue)?.1;
         if let Ok(size) = parse_as("font-size", std::slice::from_ref(item)) {
@@ -256,6 +259,15 @@ fn font(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> {
             if let Ok(v) = parse_as("font-weight", std::slice::from_ref(item)) {
                 if !matches!(v, SpecifiedValue::CssWide(_)) {
                     weight = Some(v);
+                    k += 1;
+                    continue;
+                }
+            }
+        }
+        if stretch.is_none() {
+            if let Ok(v) = parse_as("font-stretch", std::slice::from_ref(item)) {
+                if !matches!(v, SpecifiedValue::CssWide(_)) {
+                    stretch = Some(v);
                     k += 1;
                     continue;
                 }
@@ -288,6 +300,10 @@ fn font(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> {
         (
             "font-weight",
             weight.unwrap_or(SpecifiedValue::Value(Initial::Keyword("normal").to_value())),
+        ),
+        (
+            "font-stretch",
+            stretch.unwrap_or(SpecifiedValue::Value(Initial::Keyword("normal").to_value())),
         ),
         ("font-size", size),
         ("line-height", line_height),
