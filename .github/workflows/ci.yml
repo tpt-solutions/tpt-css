@@ -98,3 +98,14 @@ jobs:
           for target in tokenizer stylesheet declaration selector calc color; do
             cargo +nightly fuzz run "$target" -- -max_total_time=60
           done
+
+  playground:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Build the WASM playground
+        working-directory: playground
+        run: cargo build --release --target wasm32-unknown-unknown

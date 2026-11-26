@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tpt-css playground</title>
+  <style>
+    body { font: 14px/1.4 system-ui, sans-serif; margin: 1rem; color: #222; }
+    h1 { font-size: 1.25rem; margin: 0 0 .5rem; }
+    .panes { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+    textarea { width: 100%; height: 16rem; font: 13px/1.4 ui-monospace, Consolas, monospace; box-sizing: border-box; }
+    pre { background: #f5f5f5; padding: .5rem; min-height: 8rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .row { display: flex; gap: .5rem; margin: .5rem 0; align-items: center; }
+    .status { color: #555; }
+  </style>
+</head>
+<body>
+  <h1>tpt-css playground</h1>
+  <p>Runs the engine in your browser. Check reports diagnostics for the stylesheet. Compute takes a fixture tree (see docs/CLI.md) and lists the computed styles it changed.</p>
+  <div class="panes">
+    <div>
+      <label for="css">Stylesheet (CSS)</label>
+      <textarea id="css" spellcheck="false">p { color: red; colr: blue }
+.note { color: green }
+h1 { color: }</textarea>
+    </div>
+    <div>
+      <label for="tree">Fixture (JSON)</label>
+      <textarea id="tree" spellcheck="false">{
+  "stylesheets": ["p { color: red } .note { color: blue }"],
+  "root": {
+    "element": "div",
+    "id": "main",
+    "children": [
+      { "element": "p", "class": "note", "style": "margin-top: 3px",
+        "children": [ { "text": "hi" } ] },
+      { "element": "p" }
+    ]
+  }
+}</textarea>
+    </div>
+  </div>
+  <div class="row">
+    <button id="check">Check stylesheet</button>
+    <button id="compute">Compute styles</button>
+    <button id="all">Compute (all properties)</button>
+    <span id="status" class="status">Loading module…</span>
+  </div>
+  <pre id="out"></pre>
+  <script src="playground.js"></script>
+</body>
+</html>

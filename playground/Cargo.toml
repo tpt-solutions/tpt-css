@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# WASM playground: CSS in, diagnostics and computed styles out, on a static page.
+# Built separately from the engine. Build with `playground/build.sh`.
+[package]
+name = "tpt-css-playground"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+tpt-css = { path = ".." }
+
+# This crate is its own workspace, so the engine's workspace settings do not apply.
+[workspace]

@@ -23,3 +23,7 @@ fuzz/corpus/
 .env.*
 *.pem
 *.key
+
+# WASM playground build output
+playground/target/
+playground/playground.wasm
