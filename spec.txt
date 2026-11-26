@@ -1153,13 +1153,13 @@ pub struct CascadeKey {
     pub context: CascadeContext,
     pub inline: bool,
     pub layer: LayerOrder,
-    pub scope_proximity: ScopeProximity,
     pub specificity: Specificity,
+    pub scope_proximity: ScopeProximity,
     pub order: DeclarationOrder,
 }
 ```
 
-The exact comparison order must follow the implemented cascade level.
+The exact comparison order must follow the implemented cascade level. Under Cascade 6 (the sorting order in the current draft), specificity is compared before scope proximity, and a rule without a scoping root has infinite proximity. The field order above follows that comparison order.
 
 The engine should initially target Cascade 5 behavior, then add Cascade 6 scoping proximity when `@scope` is enabled.
 
