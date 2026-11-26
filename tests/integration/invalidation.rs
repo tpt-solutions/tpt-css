@@ -343,3 +343,59 @@ fn an_attribute_read_by_content_restyles_the_pseudo_element() {
     );
     assert_eq!(map, full(css, &t, &env));
 }
+
+/// `:nth-child(of S)` results come from a per-parent index that is cached for a
+/// pass. Positions must be right, and a class change must restyle the same as a
+/// full resolve, which checks that the cache is rebuilt when the tree changes.
+#[test]
+fn nth_child_of_s_uses_positions_among_matching_siblings() {
+    let css = "li:nth-child(1 of .x) { margin-left: 1px } li:nth-last-child(1 of .x) { margin-right: 2px }";
+    let env = Environment::default();
+    let mut t = TestTree::new(NodeKind::Element);
+    let root = t.root();
+    t.nodes[0].name.local = "ul".into();
+    let items: Vec<NodeId> = (0..5).map(|_| t.element(root, "li")).collect();
+    for &i in &[1usize, 3, 4] {
+        t.add_class(items[i], "x");
+    }
+    let mut r = resolver_for(css);
+    let first_margin = |m: &tpt_css::StyleMap, n: NodeId| {
+        m.get(n)
+            .unwrap()
+            .raw(tpt_css::properties::lookup("margin-left").unwrap())
+            .clone()
+    };
+    let last_margin = |m: &tpt_css::StyleMap, n: NodeId| {
+        m.get(n)
+            .unwrap()
+            .raw(tpt_css::properties::lookup("margin-right").unwrap())
+            .clone()
+    };
+    let map = r.resolve(&t, &env).clone();
+    // Matching siblings are items 1, 3, and 4. The first of them is item 1, and
+    // the last is item 4.
+    assert_eq!(
+        first_margin(&map, items[1]),
+        tpt_css::values::Value::px(1.0)
+    );
+    assert_eq!(
+        first_margin(&map, items[3]),
+        tpt_css::values::Value::px(0.0)
+    );
+    assert_eq!(last_margin(&map, items[4]), tpt_css::values::Value::px(2.0));
+    assert_eq!(last_margin(&map, items[1]), tpt_css::values::Value::px(0.0));
+
+    // Adding the class to item 0 moves the first match to item 0.
+    t.add_class(items[0], "x");
+    r.invalidate(&t, StyleChange::AttributeChanged(items[0]));
+    let map = r.restyle(&t, &env).clone();
+    assert_eq!(
+        first_margin(&map, items[0]),
+        tpt_css::values::Value::px(1.0)
+    );
+    assert_eq!(
+        first_margin(&map, items[1]),
+        tpt_css::values::Value::px(0.0)
+    );
+    assert_eq!(map, full(css, &t, &env));
+}
