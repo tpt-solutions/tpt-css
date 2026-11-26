@@ -77,7 +77,10 @@ fn computed_style_snapshots_match() {
             std::fs::write(&snap, &actual).expect("snapshot is writable");
             continue;
         }
-        let expected = std::fs::read_to_string(&snap).unwrap_or_default();
+        // Git on Windows may check the snapshot out with CRLF endings.
+        let expected = std::fs::read_to_string(&snap)
+            .unwrap_or_default()
+            .replace("\r\n", "\n");
         if expected != actual {
             failures.push(format!(
                 "snapshot `{name}` changed:\n{}",
