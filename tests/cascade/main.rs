@@ -30,6 +30,7 @@ fn key(
         origin,
         important,
         layer: tpt_css::cascade::UNLAYERED_NORMAL,
+        scope_proximity: u32::MAX,
         inline,
         specificity: spec,
         order,

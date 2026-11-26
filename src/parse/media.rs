@@ -11,7 +11,9 @@
 use super::diagnostics::{Diagnostic, DiagnosticCode};
 use super::selectors::span_of;
 use super::split_on;
-use crate::ast::media::{Comparison, MediaFeature, MediaQuery, MediaType, PointerKind};
+use crate::ast::media::{
+    Comparison, ContrastKind, MediaFeature, MediaQuery, MediaType, PointerKind, UpdateKind,
+};
 use crate::syntax::{trim_whitespace, BlockKind, ComponentValue, TokenKind};
 use crate::values::LengthUnit;
 
@@ -177,6 +179,28 @@ pub(crate) fn parse_feature(values: &[ComponentValue]) -> MediaFeature {
             Some("none") => MediaFeature::Hover(false),
             _ => MediaFeature::Unknown(name),
         },
+        "prefers-contrast" => match keyword(value).as_deref() {
+            Some("no-preference") => MediaFeature::PrefersContrast(ContrastKind::NoPreference),
+            Some("more") => MediaFeature::PrefersContrast(ContrastKind::More),
+            Some("less") => MediaFeature::PrefersContrast(ContrastKind::Less),
+            Some("custom") => MediaFeature::PrefersContrast(ContrastKind::Custom),
+            _ => MediaFeature::Unknown(name),
+        },
+        "dynamic-range" => match keyword(value).as_deref() {
+            Some("standard") => MediaFeature::DynamicRange(false),
+            Some("high") => MediaFeature::DynamicRange(true),
+            _ => MediaFeature::Unknown(name),
+        },
+        "update" => match keyword(value).as_deref() {
+            Some("none") => MediaFeature::Update(UpdateKind::None),
+            Some("slow") => MediaFeature::Update(UpdateKind::Slow),
+            Some("fast") => MediaFeature::Update(UpdateKind::Fast),
+            _ => MediaFeature::Unknown(name),
+        },
+        "resolution" => match resolution_value(value) {
+            Some(dppx) => MediaFeature::Resolution(comparison, dppx),
+            None => MediaFeature::Unknown(name),
+        },
         "pointer" => match keyword(value).as_deref() {
             Some("none") => MediaFeature::Pointer(PointerKind::None),
             Some("coarse") => MediaFeature::Pointer(PointerKind::Coarse),
@@ -305,4 +329,21 @@ pub(crate) fn parse_container_prelude(
         ));
     }
     Ok((name, features))
+}
+
+/// A resolution in `dppx` (or `x`), `dpi`, or `dpcm`, as device pixels per
+/// CSS pixel. There are 96 CSS px to an inch, and 2.54 cm to an inch.
+fn resolution_value(values: &[ComponentValue]) -> Option<f64> {
+    match values {
+        [ComponentValue::Token(t)] => match &t.kind {
+            TokenKind::Dimension { value, unit, .. } => match unit.to_ascii_lowercase().as_str() {
+                "dppx" | "x" => Some(*value),
+                "dpi" => Some(*value / 96.0),
+                "dpcm" => Some(*value * 2.54 / 96.0),
+                _ => None,
+            },
+            _ => None,
+        },
+        _ => None,
+    }
 }

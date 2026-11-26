@@ -254,3 +254,93 @@ fn seeded_hostile_text_does_not_panic_the_css_modules() {
         let _ = resolver.resolve(&t, &Environment::default());
     }
 }
+
+/// A one-child tree and the child's computed value of `prop` under `css`.
+fn px_of(css: &str, prop: &str) -> tpt_css::values::Value {
+    use tpt_css::properties::lookup;
+    let mut t = TestTree::new(NodeKind::Element);
+    let root = t.root();
+    t.nodes[0].name.local = "root".into();
+    let child = t.element(root, "child");
+    let map = style_with(css, &t);
+    super::common::style_of(&map, child)
+        .raw(lookup(prop).unwrap())
+        .clone()
+}
+
+#[test]
+fn box_shorthands_expand_to_the_four_sides_for_every_arity() {
+    use tpt_css::values::Value;
+    // CSS Box 4: one value sets all four sides; two set vertical and
+    // horizontal; three set top, horizontal, and bottom; four set each side.
+    const SIDES: [&str; 4] = ["margin-top", "margin-right", "margin-bottom", "margin-left"];
+    let mut rng = Rng(0x5EED_0001);
+    for _ in 0..200 {
+        let n = 1 + (rng.next() % 4) as usize;
+        let values: Vec<f64> = (0..n).map(|_| (rng.next() % 40) as f64).collect();
+        let text = values
+            .iter()
+            .map(|v| format!("{v}px"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        // Map each side to the index of the value that supplies it.
+        let pick = |top: usize, right: usize, bottom: usize, left: usize| {
+            [top, right, bottom, left].map(|i| values[i])
+        };
+        let expected = match n {
+            1 => pick(0, 0, 0, 0),
+            2 => pick(0, 1, 0, 1),
+            3 => pick(0, 1, 2, 1),
+            _ => pick(0, 1, 2, 3),
+        };
+        let css = format!("child {{ margin: {text} }}");
+        for (side, want) in SIDES.iter().zip(expected) {
+            assert_eq!(
+                px_of(&css, side),
+                Value::px(want),
+                "margin: {text} -> {side}"
+            );
+        }
+    }
+}
+
+#[test]
+fn calc_and_min_max_clamp_agree_with_their_definitions() {
+    use tpt_css::values::Value;
+    let mut rng = Rng(0x5EED_0002);
+    let px = |v: f64| format!("{v}px");
+    for _ in 0..200 {
+        let a = (rng.next() % 41) as f64 - 20.0;
+        let b = (rng.next() % 41) as f64 - 20.0;
+        let c = (rng.next() % 41) as f64 - 20.0;
+        let sum = px_of(
+            &format!("child {{ margin-left: calc({} + {}) }}", px(a), px(b)),
+            "margin-left",
+        );
+        assert_eq!(sum, Value::px(a + b), "calc sum of {a} and {b}");
+        let lo = a.min(b);
+        let hi = a.max(b);
+        let min = px_of(
+            &format!("child {{ margin-left: min({}, {}) }}", px(a), px(b)),
+            "margin-left",
+        );
+        assert_eq!(min, Value::px(lo), "min({a}, {b})");
+        let max = px_of(
+            &format!("child {{ margin-left: max({}, {}) }}", px(a), px(b)),
+            "margin-left",
+        );
+        assert_eq!(max, Value::px(hi), "max({a}, {b})");
+        // CSS Values 4: clamp(lo, v, hi) is max(lo, min(v, hi)), so a lower
+        // bound above the upper bound wins.
+        let clamp = px_of(
+            &format!(
+                "child {{ margin-left: clamp({}, {}, {}) }}",
+                px(a),
+                px(b),
+                px(c)
+            ),
+            "margin-left",
+        );
+        assert_eq!(clamp, Value::px(a.max(b.min(c))), "clamp({a}, {b}, {c})");
+    }
+}

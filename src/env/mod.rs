@@ -11,7 +11,7 @@
 pub mod container;
 pub mod media;
 
-use crate::ast::PointerKind;
+use crate::ast::media::{ContrastKind, PointerKind, UpdateKind};
 
 /// Viewport size in CSS px.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -32,7 +32,7 @@ pub enum MediaKind {
 }
 
 /// User and device preferences that media features read (spec 16.3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MediaEnvironment {
     /// The output medium.
     pub kind: MediaKind,
@@ -44,6 +44,14 @@ pub struct MediaEnvironment {
     pub hover: bool,
     /// `pointer` of the primary input.
     pub pointer: PointerKind,
+    /// `prefers-contrast`.
+    pub contrast: ContrastKind,
+    /// `dynamic-range: high`.
+    pub high_dynamic_range: bool,
+    /// `update` frequency of the output.
+    pub update: UpdateKind,
+    /// Device pixels per CSS pixel, for `resolution` (`dppx`).
+    pub device_pixel_ratio: f64,
 }
 
 impl Default for MediaEnvironment {
@@ -54,6 +62,10 @@ impl Default for MediaEnvironment {
             reduced_motion: false,
             hover: true,
             pointer: PointerKind::Fine,
+            contrast: ContrastKind::NoPreference,
+            high_dynamic_range: false,
+            update: UpdateKind::Fast,
+            device_pixel_ratio: 1.0,
         }
     }
 }

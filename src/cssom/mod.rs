@@ -19,6 +19,7 @@
 //! example `@font-face` descriptors or `@keyframes` steps) are serialized from
 //! their parsed form, and some formatting is lost.
 
+use crate::ast::media::{ContrastKind, UpdateKind};
 use crate::ast::selector::{
     AttributeOperator, Combinator, ComplexSelector, PseudoClass, SelectorList, SimpleSelector,
 };
@@ -410,6 +411,33 @@ fn serialize_feature(feature: &MediaFeature) -> String {
                 crate::ast::PointerKind::Fine => "fine",
             }
         ),
+        MediaFeature::PrefersContrast(kind) => format!(
+            "prefers-contrast: {}",
+            match kind {
+                ContrastKind::NoPreference => "no-preference",
+                ContrastKind::More => "more",
+                ContrastKind::Less => "less",
+                ContrastKind::Custom => "custom",
+            }
+        ),
+        MediaFeature::DynamicRange(high) => {
+            format!("dynamic-range: {}", if *high { "high" } else { "standard" })
+        }
+        MediaFeature::Update(kind) => format!(
+            "update: {}",
+            match kind {
+                UpdateKind::None => "none",
+                UpdateKind::Slow => "slow",
+                UpdateKind::Fast => "fast",
+            }
+        ),
+        MediaFeature::Resolution(cmp, dppx) => {
+            format!(
+                "{}: {}dppx",
+                cmp_name("resolution", *cmp),
+                format_number(*dppx)
+            )
+        }
         MediaFeature::Unknown(name) => name.clone(),
     }
 }

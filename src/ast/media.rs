@@ -72,6 +72,39 @@ pub enum MediaFeature {
     Hover(bool),
     /// `pointer: none | coarse | fine`.
     Pointer(PointerKind),
+    /// `prefers-contrast: no-preference | more | less | custom`.
+    PrefersContrast(ContrastKind),
+    /// `dynamic-range: standard | high`. `true` means high.
+    DynamicRange(bool),
+    /// `update: none | slow | fast`.
+    Update(UpdateKind),
+    /// `resolution`, `min-resolution`, `max-resolution` in device pixels per
+    /// CSS pixel (`dppx`). `dpi` and `dpcm` are converted at parse time.
+    Resolution(Comparison, f64),
     /// A feature this engine does not know. The query never matches.
     Unknown(String),
+}
+
+/// Contrast preference (Media Queries 5, `prefers-contrast`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContrastKind {
+    /// `no-preference`
+    NoPreference,
+    /// `more`
+    More,
+    /// `less`
+    Less,
+    /// `custom`
+    Custom,
+}
+
+/// How often the output can change (Media Queries 5, `update`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpdateKind {
+    /// `none`, such as print.
+    None,
+    /// `slow`, such as e-ink.
+    Slow,
+    /// `fast`, such as a screen.
+    Fast,
 }

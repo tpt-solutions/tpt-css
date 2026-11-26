@@ -43,5 +43,7 @@ pub use style::custom::CustomPropertyValue;
 pub use style::custom::RegisteredProperty;
 pub use style::inspect::Inspection;
 pub use style::invalidation::StyleChange;
-pub use style::resolver::{ResolverConfig, SheetId, StyleResolver, VisitedPolicy};
+pub use style::resolver::{
+    ResolverConfig, SheetId, StyleResolver, StylesheetLimitExceeded, VisitedPolicy,
+};
 pub use tree::contract::StyleTree;

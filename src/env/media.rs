@@ -62,6 +62,10 @@ fn feature_matches(feature: &MediaFeature, env: &Environment) -> bool {
         MediaFeature::PrefersReducedMotion(want) => env.media.reduced_motion == *want,
         MediaFeature::Hover(want) => env.media.hover == *want,
         MediaFeature::Pointer(kind) => env.media.pointer == *kind,
+        MediaFeature::PrefersContrast(kind) => env.media.contrast == *kind,
+        MediaFeature::DynamicRange(high) => env.media.high_dynamic_range == *high,
+        MediaFeature::Update(kind) => env.media.update == *kind,
+        MediaFeature::Resolution(cmp, dppx) => compare(env.media.device_pixel_ratio, *dppx, *cmp),
         MediaFeature::Unknown(_) => false,
     }
 }

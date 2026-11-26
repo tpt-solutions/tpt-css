@@ -146,7 +146,7 @@ All decisions are recorded in DESIGN.md section 2.
 
 - [x] `@layer` with first-declaration order and layer cascade rules (spec 13.4). Tests: `tests/cascade/layers.rs`.
 - [x] `@supports` using engine's own capabilities, `selector()`, `not`, `and`, `or` (spec 16.4). Evaluated at parse time.
-- [~] `@scope`, `:scope`, Cascade 6 scope proximity (spec 13.3). `@scope` with a root, a limit, and `:scope` is done (`tests/selectors/m3.rs`). Scope proximity ordering is not: scoped rules rank by specificity alone.
+- [x] `@scope`, `:scope`, Cascade 6 scope proximity (spec 13.3). Proximity ranks after inline and before specificity, as in the key in `spec.txt` 13.3. An unscoped rule has infinite proximity; that reading of Cascade 6 needs review against the spec text (`tests/style/m3.rs`).
 - [x] CSS nesting and `&` (spec 12.3).
 - [x] `@container` foundation and `ContainerSizeProvider` (spec 16.5).
 - [x] `@property` and registered custom properties (spec 13.7).
@@ -171,7 +171,7 @@ All decisions are recorded in DESIGN.md section 2.
 - [~] Selector dependency graph (spec 12.4, 17.2). Not built. The restyle uses two conservative flags per rule: `structural` (sibling-dependent) and `needs_ancestors` (`:has()`, `:scope`, `@scope`). Each drives a wider restyle.
 - [ ] Custom property dependency graph (spec 17.2). Not started; a custom property change restyles the element it is on.
 - [~] `StyleChange` enum and `RestyleHint` (spec 17.1, 17.2). `StyleChange` exists, but `AttributeChanged` carries no attribute name, and there is no `RestyleHint` type.
-- [~] `invalidate` and `restyle` on `StyleResolver` (spec 8.2). Done, with an equality cutoff: an element whose computed style is unchanged stops the restyle, when every rule is subject-only.
+- [~] `invalidate` and `restyle` on `StyleResolver` (spec 8.2). Done, with an equality cutoff: an element whose computed style is unchanged stops the restyle, when every rule is subject-only. The restyle copies the cached map once per call (down from twice); returning a shared reference is still open.
 - [ ] Style sharing with safe sharing key (spec 17.3). Not started.
 - [~] `:has()` invalidation graph (spec 12.4). Conservative: any attribute change restyles everything when a `:has()` rule exists.
 - [~] Media and container query invalidation (spec 16.3, 16.5). An environment change or a container provider restyles everything. No finer tracking.
@@ -182,13 +182,13 @@ All decisions are recorded in DESIGN.md section 2.
 - [x] Devtools-facing inspection data (spec 7 `diagnostics`), via `StyleResolver::inspect`.
 - [x] Visited-link privacy policy: `VisitedPolicy` (spec 20.2).
 - [~] Web profile integration tests (`--features web`). The `web` feature enables the CSSOM tests. There is no DOM adapter, so no end-to-end web test exists.
-- [~] Acceptance: incremental restyle, no full-document restyle for simple local changes. Met for subject-only rules: a local change restyles one element (`tests/integration/perf.rs`, `tests/integration/invalidation.rs`). The restyle still copies the whole map (about 32 ms for 10,000 elements, measured); returning a shared map is an open API change.
+- [~] Acceptance: incremental restyle, no full-document restyle for simple local changes. Met for subject-only rules: a local change restyles one element (`tests/integration/perf.rs`, `tests/integration/invalidation.rs`). The restyle copies the whole map once (about 16 ms for 10,000 elements, measured, down from 32 ms); returning a shared map is an open API change.
 
 ## 6. M4: long-tail web compatibility (spec 24)
 
 - [ ] Long-tail selectors (spec 12.2 Tier 3): `:defined`, `:local-link`, `:current`, `:past`, `:future`, media-state pseudos, and the rest. Not started; most need host state this engine does not model.
 - [ ] Long-tail properties and advanced values (spec 15.2). Not started beyond the M1 and M2 sets.
-- [~] Advanced colors and media features (spec 14.5, 16.3). Full named color set (148), `lab()`, `lch()`, `oklab()`, `oklch()`, `color()` (srgb), `color-mix()` (srgb). Media features `resolution`, `update`, `dynamic-range`, and `prefers-contrast` are not implemented; they never match.
+- [~] Advanced colors and media features (spec 14.5, 16.3). Full named color set (148), `lab()`, `lch()`, `oklab()`, `oklch()`, `color()` (srgb), `color-mix()` (srgb). Media features `resolution`, `update`, `dynamic-range`, and `prefers-contrast` are done. Relative color syntax (`rgb(from ...)`) is not: it needs forward conversions to HSL, HWB, Lab, LCh, OKLab, and OKLCh, which the engine does not have yet.
 - [ ] Shadow DOM edge cases (spec 9.3). Not started. `ShadowInfo` is part of the tree contract but nothing reads it.
 - [ ] `::part`, `::slotted`, `::highlight()` and related pseudos. Not started; the pseudo-element identities exist, but they are not parsed.
 - [~] Serialization edge cases. Canonical serialization of values, selectors, and rules; the exact CSS spelling of every edge case is not checked.
@@ -203,9 +203,9 @@ All decisions are recorded in DESIGN.md section 2.
 - [x] `SPEC_TRACE.md` updated (spec 22.5). A test (`tests/integration/spec_trace.rs`) checks that every file the trace names exists.
 - [x] `CLEAN_ROOM.md` provenance log updated for each contributor (spec 23.1). Entries added for each batch; each needs a human review.
 - [ ] Fuzz targets: tokenizer, stylesheet, selector, declaration, var, calc, color (spec 22.3). Not written. Seeded randomized tests stand in for them (`tests/integration/property.rs`); those are deterministic, not coverage-guided fuzzing.
-- [~] Property-based tests (spec 22.4). Seeded generators cover specificity additivity, `:is()` and `:where()` equivalence, incremental restyle against a full resolve, custom property cycle termination, declaration round trips, and hostile text. Shorthand round trips and calc invariants are not covered yet.
+- [~] Property-based tests (spec 22.4). Seeded generators cover specificity additivity, `:is()` and `:where()` equivalence, incremental restyle against a full resolve, custom property cycle termination, declaration round trips, hostile text, every arity of the `margin` shorthand, and the `calc`, `min`, `max`, and `clamp` definitions. Other shorthands and the other math functions are not covered yet.
 - [~] Performance targets measured (spec 21.1). Tokenizer throughput and static-tree restyle measured (`tests/integration/perf.rs`, ignored by default; numbers in DESIGN.md section 8). Not measured: the 'avoid quadratic selector matching' target for wide trees with structural selectors.
-- [~] Bounds enforced (spec 20.3). Tokens, nesting, selector work and complexity, rule and declaration counts, input size, var depth, custom property cycles, and the step budget. Not enforced: calc depth is a fixed constant rather than configurable, and no stylesheet count limit exists.
+- [~] Bounds enforced (spec 20.3). Tokens, nesting, selector work and complexity, rule and declaration counts, input size, var depth, custom property cycles, the step budget, and stylesheet count (`max_stylesheets`, via `try_add_stylesheet`). Calc nesting is checked against `max_calc_depth` at declaration parse and after `var()` substitution; the value parser's own bound stays at 32, so a larger configured value does not raise it.
 - [~] No panics on hostile input (spec 19.1). Seeded hostile-text tests; not a fuzzer.
 - [x] Determinism: no hash-map iteration in cascade (spec 21.3).
 - [x] `cargo deny check licenses` and `bans` pass locally. Not run in CI on a runner.

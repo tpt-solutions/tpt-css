@@ -7,7 +7,7 @@
 //! at-rules `@media`, `@layer`, `@supports`, `@container`, `@property`,
 //! `@keyframes`, and `@font-face`. Other at-rules are preserved as unknown.
 
-use super::declarations::parse_block_contents;
+use super::declarations::{parse_block_contents, within_math_depth};
 use super::diagnostics::{Diagnostic, DiagnosticCode};
 use super::media::{parse_container_prelude, parse_media_queries};
 use super::selectors::{contains_nesting, parse_selector_list, resolve_nesting, span_of};
@@ -650,7 +650,11 @@ fn push_declaration(
         return;
     }
     match super::declarations::parse_declaration(chunk) {
-        Ok(decl) => out.push(decl),
+        Ok(decl) => {
+            if within_math_depth(&decl, limits, diagnostics) {
+                out.push(decl);
+            }
+        }
         Err(diag) => diagnostics.push(diag),
     }
 }

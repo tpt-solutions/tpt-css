@@ -27,6 +27,8 @@ pub struct ParseLimits {
     pub max_calc_depth: usize,
     /// Maximum selector-matching steps per node per selector.
     pub max_match_steps: usize,
+    /// Maximum stylesheets added to one resolver (spec 20.3).
+    pub max_stylesheets: usize,
 }
 
 impl Default for ParseLimits {
@@ -41,6 +43,7 @@ impl Default for ParseLimits {
             max_var_depth: 32,
             max_calc_depth: 32,
             max_match_steps: 100_000,
+            max_stylesheets: 4096,
         }
     }
 }

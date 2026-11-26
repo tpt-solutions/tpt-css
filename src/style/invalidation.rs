@@ -83,13 +83,12 @@ impl StyleResolver {
             return self.resolve(tree, env);
         }
 
-        let mut map = self
-            .cache
-            .as_ref()
-            .map(|c| c.map.clone())
-            .unwrap_or_default();
+        // Move the cached map out and work on it in place. The cache gets the
+        // map back at the end, and the caller gets one copy, so a restyle
+        // copies the map once rather than twice.
+        let mut map = self.cache.take().map(|c| c.map).unwrap_or_default();
         let active = self.active_rules(env);
-        let max_var_depth = self.config.limits.max_var_depth;
+        let limits = &self.config.limits;
         let dirty: Vec<NodeId> = std::mem::take(&mut self.dirty).into_iter().collect();
         let cutoff = self.subject_only();
 
@@ -104,24 +103,13 @@ impl StyleResolver {
                 parent: parent_style,
                 rem_base: rem_base_for(tree, node, &map, env),
             };
-            styled += style_tree(
-                self,
-                tree,
-                start,
-                env,
-                &active,
-                max_var_depth,
-                cutoff,
-                &mut map,
-            );
+            styled += style_tree(self, tree, start, env, &active, limits, cutoff, &mut map);
         }
 
         self.last_restyled = styled;
-        self.cache = Some(crate::style::resolver::Cache {
-            map: map.clone(),
-            env: *env,
-        });
-        map
+        let out = map.clone();
+        self.cache = Some(crate::style::resolver::Cache { map, env: *env });
+        out
     }
 
     /// Number of elements styled by the most recent [`StyleResolver::resolve`]

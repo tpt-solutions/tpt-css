@@ -787,3 +787,54 @@ pub fn serialize(node: &CalcNode) -> String {
 fn join(args: &[CalcNode]) -> String {
     args.iter().map(serialize).collect::<Vec<_>>().join(", ")
 }
+
+/// The names of the math functions that count toward `max_calc_depth`.
+fn is_math_function_name(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "calc"
+            | "min"
+            | "max"
+            | "clamp"
+            | "round"
+            | "mod"
+            | "rem"
+            | "abs"
+            | "sign"
+            | "hypot"
+            | "sqrt"
+            | "pow"
+            | "log"
+            | "exp"
+            | "sin"
+            | "cos"
+            | "tan"
+            | "asin"
+            | "acos"
+            | "atan"
+            | "atan2"
+            | "progress"
+    )
+}
+
+/// The deepest nesting of math functions in `values`, the quantity that
+/// `ParseLimits::max_calc_depth` bounds (spec 20.3). Other functions and blocks
+/// add no depth of their own, but they can contain math functions.
+pub fn math_nesting_depth(values: &[ComponentValue]) -> usize {
+    values
+        .iter()
+        .map(|v| match v {
+            ComponentValue::Function(f) => {
+                let inner = math_nesting_depth(&f.value);
+                if is_math_function_name(&f.name) {
+                    inner + 1
+                } else {
+                    inner
+                }
+            }
+            ComponentValue::Block(b) => math_nesting_depth(&b.value),
+            ComponentValue::Token(_) => 0,
+        })
+        .max()
+        .unwrap_or(0)
+}

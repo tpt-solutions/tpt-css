@@ -257,17 +257,34 @@ impl StyleResolver {
 
     /// Adds a parsed stylesheet with the given origin (spec 8.2).
     ///
-    /// Declarations that name unknown properties or have invalid values are
-    /// ignored here, since the parser already reported them. Rules inside
-    /// `@media`, `@container`, and `@layer` keep their conditions and layer.
+    /// If the resolver already holds `ParseLimits::max_stylesheets` sheets, the
+    /// sheet is not added, and the returned id matches no sheet. Use
+    /// [`StyleResolver::try_add_stylesheet`] to learn when that happens.
     pub fn add_stylesheet(&mut self, sheet: Stylesheet, origin: Origin) -> SheetId {
+        self.try_add_stylesheet(sheet, origin)
+            .unwrap_or(SheetId(u32::MAX))
+    }
+
+    /// Adds a parsed stylesheet, or reports that the sheet limit is reached
+    /// (spec 20.3). Declarations that name unknown properties or have invalid
+    /// values are ignored here, since the parser already reported them. Rules
+    /// inside `@media`, `@container`, and `@layer` keep their conditions and layer.
+    pub fn try_add_stylesheet(
+        &mut self,
+        sheet: Stylesheet,
+        origin: Origin,
+    ) -> Result<SheetId, StylesheetLimitExceeded> {
+        let limit = self.config.limits.max_stylesheets;
+        if self.sheets.len() >= limit {
+            return Err(StylesheetLimitExceeded { limit });
+        }
         let id = SheetId(self.next_sheet);
         self.next_sheet += 1;
         let mut rules = Vec::new();
         self.flatten(sheet.rules, &FlattenCtx::default(), &mut rules);
         self.sheets.push(LoadedSheet { id, origin, rules });
         self.full_dirty = true;
-        id
+        Ok(id)
     }
 
     /// Removes a stylesheet. Unknown ids are ignored.
@@ -280,22 +297,13 @@ impl StyleResolver {
     pub fn resolve<T: StyleTree>(&mut self, tree: &T, env: &Environment) -> StyleMap {
         let active = self.active_rules(env);
         let mut map = StyleMap::default();
-        let max_var_depth = self.config.limits.max_var_depth;
+        let limits = &self.config.limits;
         let start = Frame {
             node: tree.root(),
             parent: None,
             rem_base: None,
         };
-        self.last_restyled = style_tree(
-            self,
-            tree,
-            start,
-            env,
-            &active,
-            max_var_depth,
-            false,
-            &mut map,
-        );
+        self.last_restyled = style_tree(self, tree, start, env, &active, limits, false, &mut map);
         self.cache = Some(Cache {
             map: map.clone(),
             env: *env,
@@ -404,6 +412,7 @@ impl StyleResolver {
                 let Some(scope) = scope_for(tree, node, &rule.scopes, max_steps) else {
                     continue;
                 };
+                let proximity = scope_proximity(tree, node, scope);
                 for (sel_idx, selector) in rule.selectors.selectors.iter().enumerate() {
                     let uses_visited = rule.visited.get(sel_idx).copied().unwrap_or(false);
                     if uses_visited && self.config.visited == VisitedPolicy::Disabled {
@@ -424,6 +433,7 @@ impl StyleResolver {
                             origin: sheet.origin,
                             important: decl.important,
                             layer: layer_key(rule.layer, decl.important),
+                            scope_proximity: proximity,
                             inline: false,
                             specificity: selector.specificity,
                             order: DeclarationOrder {
@@ -447,6 +457,7 @@ impl StyleResolver {
                         origin: Origin::Author,
                         important: compiled.important,
                         layer: layer_key(None, compiled.important),
+                        scope_proximity: u32::MAX,
                         inline: true,
                         specificity: Specificity::default(),
                         order: DeclarationOrder::inline(index),
@@ -593,6 +604,27 @@ fn scope_for<T: StyleTree>(
     Some(scope)
 }
 
+/// Scope proximity of an element for a rule scoped to `root` (Cascade 6): the
+/// number of ancestor steps from the element up to the root. An unscoped rule
+/// (`root` is `None`) gets `u32::MAX`, so any scoped rule beats it.
+fn scope_proximity<T: StyleTree>(tree: &T, node: NodeId, root: Option<NodeId>) -> u32 {
+    let Some(root) = root else {
+        return u32::MAX;
+    };
+    let mut steps = 0u32;
+    let mut current = node;
+    while current != root {
+        match tree.parent(current) {
+            Some(parent) => {
+                steps = steps.saturating_add(1);
+                current = parent;
+            }
+            None => return u32::MAX,
+        }
+    }
+    steps
+}
+
 /// The nearest scope root above `node` (or `node` itself), if no limit element
 /// lies between them. Without a root selector the root element is the scope root.
 fn scope_root_for<T: StyleTree>(
@@ -713,7 +745,7 @@ pub(crate) fn style_tree<T: StyleTree>(
     start: Frame,
     env: &Environment,
     active: &[Vec<bool>],
-    max_var_depth: usize,
+    limits: &ParseLimits,
     cutoff: bool,
     map: &mut StyleMap,
 ) -> usize {
@@ -731,7 +763,7 @@ pub(crate) fn style_tree<T: StyleTree>(
                     frame.parent.as_ref(),
                     root_fs,
                     env,
-                    max_var_depth,
+                    limits,
                     &resolver.registered,
                     container,
                 );
@@ -744,7 +776,7 @@ pub(crate) fn style_tree<T: StyleTree>(
                             Some(&style),
                             root_fs,
                             env,
-                            max_var_depth,
+                            limits,
                             &resolver.registered,
                             container,
                         );
@@ -820,7 +852,7 @@ fn compute_style(
     parent: Option<&ComputedStyle>,
     root_fs: f64,
     env: &Environment,
-    max_var_depth: usize,
+    limits: &ParseLimits,
     registered: &BTreeMap<String, RegisteredProperty>,
     container: Option<(f64, f64)>,
 ) -> ComputedStyle {
@@ -833,7 +865,7 @@ fn compute_style(
         &declared,
         parent.map(|p| p.customs()),
         registered,
-        max_var_depth,
+        limits.max_var_depth,
     );
 
     let parent_font_size = parent.map_or(env.root_font_size, |p| p.font_size());
@@ -855,7 +887,7 @@ fn compute_style(
     let mut values: Vec<Value> = PROPERTIES.iter().map(|p| p.initial.to_value()).collect();
     for idx in compute_order() {
         let id = PropertyId(idx as u16);
-        let specified = specified_value(idx, &cas.props[idx], parent, &customs, max_var_depth);
+        let specified = specified_value(idx, &cas.props[idx], parent, &customs, limits);
         let computed = compute_value(id, spec(id).grammar, specified, &ctx);
         if id == ids::FONT_SIZE {
             if let Value::Length { value, .. } = computed {
@@ -908,7 +940,7 @@ fn resolve_winner(
     candidates: &[Winner],
     idx: usize,
     customs: &BTreeMap<String, CustomPropertyValue>,
-    max_var_depth: usize,
+    limits: &ParseLimits,
 ) -> Option<SpecifiedValue> {
     let mut pool: Vec<&Winner> = candidates.iter().collect();
     loop {
@@ -923,7 +955,7 @@ fn resolve_winner(
                 pool.retain(|c| c.key.origin == origin && c.key.layer < layer);
             }
             SpecifiedValue::Unparsed { tokens, shorthand } => {
-                return resolve_unparsed(idx, tokens, *shorthand, customs, max_var_depth);
+                return resolve_unparsed(idx, tokens, *shorthand, customs, limits);
             }
             other => return Some(other.clone()),
         }
@@ -936,10 +968,10 @@ fn specified_value(
     candidates: &[Winner],
     parent: Option<&ComputedStyle>,
     customs: &BTreeMap<String, CustomPropertyValue>,
-    max_var_depth: usize,
+    limits: &ParseLimits,
 ) -> Value {
     let info = &PROPERTIES[idx];
-    let concrete = resolve_winner(candidates, idx, customs, max_var_depth)
+    let concrete = resolve_winner(candidates, idx, customs, limits)
         .unwrap_or(SpecifiedValue::CssWide(CssWide::Unset));
     let initial = || info.initial.to_value();
     let inherit = || match parent {
@@ -969,10 +1001,13 @@ fn resolve_unparsed(
     tokens: &[ComponentValue],
     shorthand: Option<usize>,
     customs: &BTreeMap<String, CustomPropertyValue>,
-    max_var_depth: usize,
+    limits: &ParseLimits,
 ) -> Option<SpecifiedValue> {
     let mut resolver = MapResolver(customs);
-    let substituted = substitute(tokens, &mut resolver, 0, max_var_depth).ok()?;
+    let substituted = substitute(tokens, &mut resolver, 0, limits.max_var_depth).ok()?;
+    if crate::values::calc::math_nesting_depth(&substituted) > limits.max_calc_depth {
+        return None;
+    }
     let id = PropertyId(idx as u16);
     match shorthand {
         Some(sid) => {
@@ -1097,4 +1132,12 @@ fn css_wide_only(values: &[ComponentValue]) -> Option<CssWide> {
         },
         _ => None,
     }
+}
+
+/// Returned by [`StyleResolver::try_add_stylesheet`] when the resolver already
+/// holds `limit` stylesheets (`ParseLimits::max_stylesheets`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StylesheetLimitExceeded {
+    /// The limit that was reached.
+    pub limit: usize,
 }

@@ -82,7 +82,11 @@ pub(crate) fn parse_block_contents(
             break;
         }
         match parse_declaration(chunk) {
-            Ok(decl) => out.push(decl),
+            Ok(decl) => {
+                if within_math_depth(&decl, limits, diagnostics) {
+                    out.push(decl);
+                }
+            }
             Err(diag) => diagnostics.push(diag),
         }
     }
@@ -172,4 +176,23 @@ fn limit_diag(tokens: &[crate::syntax::Token], message: &str) -> Diagnostic {
         message,
         Some("https://www.w3.org/TR/css-syntax-3/"),
     )
+}
+
+/// Whether a declaration's math functions nest within `max_calc_depth`
+/// (spec 20.3). Reports a diagnostic and returns `false` when they do not.
+pub(crate) fn within_math_depth(
+    decl: &Declaration,
+    limits: &ParseLimits,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    if crate::values::calc::math_nesting_depth(&decl.value) <= limits.max_calc_depth {
+        return true;
+    }
+    diagnostics.push(Diagnostic::error(
+        DiagnosticCode::LimitExceeded,
+        decl.span,
+        "math function nesting limit exceeded",
+        Some(DECLARATIONS_URL),
+    ));
+    false
 }

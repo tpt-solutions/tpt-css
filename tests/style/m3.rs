@@ -414,3 +414,195 @@ fn progress_gives_the_fraction_between_two_bounds() {
         30.0
     ));
 }
+
+// ---- calc() nesting limit (spec 20.3) -------------------------------------------
+
+fn margin_with_calc_limit(css: &str, max_calc_depth: usize) -> Value {
+    use tpt_css::{ParseLimits, ParseOptions};
+    let limits = ParseLimits {
+        max_calc_depth,
+        ..ParseLimits::default()
+    };
+    let parsed = tpt_css::parse_stylesheet(
+        css,
+        ParseOptions {
+            limits,
+            ..ParseOptions::default()
+        },
+    );
+    let (t, _, child) = chain();
+    let mut r = StyleResolver::new(ResolverConfig {
+        limits,
+        ..ResolverConfig::default()
+    });
+    r.add_stylesheet(parsed.stylesheet, Origin::Author);
+    let map = r.resolve(&t, &Environment::default());
+    style_of(&map, child)
+        .raw(lookup("margin-left").unwrap())
+        .clone()
+}
+
+#[test]
+fn a_declaration_nested_past_max_calc_depth_is_dropped_at_parse_time() {
+    let css = "child { margin-left: calc(calc(calc(1px))) }";
+    // Depth 3 is within the default limit.
+    assert!(px_near(&margin_with_calc_limit(css, 32), 1.0));
+    // Depth 3 is past a limit of 2, so the declaration is dropped.
+    assert_eq!(margin_with_calc_limit(css, 2), margin("child { }"));
+}
+
+#[test]
+fn a_var_that_nests_calc_past_the_limit_is_dropped_at_computed_time() {
+    let css = "
+        :root { --c: calc(calc(1px)) }
+        child { margin-left: var(--c) }
+    ";
+    assert!(px_near(&margin_with_calc_limit(css, 32), 1.0));
+    assert_eq!(margin_with_calc_limit(css, 1), margin("child { }"));
+}
+
+// ---- media features added in M4 (Media Queries 5) -----------------------------
+
+fn margin_in_env(css: &str, env: &Environment) -> Value {
+    let (t, _, child) = chain();
+    let map = style_with_env(css, &t, env);
+    style_of(&map, child)
+        .raw(lookup("margin-left").unwrap())
+        .clone()
+}
+
+fn media_rule(query: &str) -> String {
+    format!("@media {query} {{ child {{ margin-left: 5px }} }}")
+}
+
+#[test]
+fn prefers_contrast_matches_its_own_preference_only() {
+    use tpt_css::ast::media::ContrastKind;
+    let css = media_rule("(prefers-contrast: more)");
+    let mut env = Environment::default();
+    assert!(!px_near(&margin_in_env(&css, &env), 5.0));
+    env.media.contrast = ContrastKind::More;
+    assert!(px_near(&margin_in_env(&css, &env), 5.0));
+}
+
+#[test]
+fn dynamic_range_and_update_read_the_environment() {
+    use tpt_css::ast::media::UpdateKind;
+    let high = media_rule("(dynamic-range: high)");
+    let mut env = Environment::default();
+    assert!(!px_near(&margin_in_env(&high, &env), 5.0));
+    env.media.high_dynamic_range = true;
+    assert!(px_near(&margin_in_env(&high, &env), 5.0));
+
+    let slow = media_rule("(update: slow)");
+    let mut env = Environment::default();
+    assert!(!px_near(&margin_in_env(&slow, &env), 5.0));
+    env.media.update = UpdateKind::Slow;
+    assert!(px_near(&margin_in_env(&slow, &env), 5.0));
+}
+
+#[test]
+fn resolution_compares_in_device_pixels_per_px() {
+    let mut env = Environment::default();
+    env.media.device_pixel_ratio = 2.0;
+    assert!(px_near(
+        &margin_in_env(&media_rule("(min-resolution: 2dppx)"), &env),
+        5.0
+    ));
+    assert!(!px_near(
+        &margin_in_env(&media_rule("(max-resolution: 1.5x)"), &env),
+        5.0
+    ));
+
+    // 96dpi is 1dppx, so a 1 dppx screen matches it exactly.
+    let env = Environment::default();
+    assert!(px_near(
+        &margin_in_env(&media_rule("(resolution: 96dpi)"), &env),
+        5.0
+    ));
+    // 37dpcm is about 0.98dppx and 36dpcm about 0.95dppx.
+    assert!(px_near(
+        &margin_in_env(&media_rule("(min-resolution: 37dpcm)"), &env),
+        5.0
+    ));
+    assert!(!px_near(
+        &margin_in_env(&media_rule("(max-resolution: 36dpcm)"), &env),
+        5.0
+    ));
+}
+
+// ---- scope proximity (Cascade 6) -------------------------------------------------
+
+/// `outer > inner > p`, with classes `outer` and `inner`.
+fn nested_scopes() -> (TestTree, NodeId) {
+    let mut t = TestTree::new(NodeKind::Element);
+    let root = t.root();
+    t.nodes[0].name.local = "html".into();
+    let outer = t.element(root, "div");
+    t.add_class(outer, "outer");
+    let inner = t.element(outer, "div");
+    t.add_class(inner, "inner");
+    let p = t.element(inner, "p");
+    (t, p)
+}
+
+fn color_of(css: &str) -> Color {
+    let (t, p) = nested_scopes();
+    let map = style_with(css, &t);
+    style_of(&map, p).color()
+}
+
+#[test]
+fn the_nearer_scope_root_wins_whatever_the_source_order() {
+    let red = Color::rgb8(255, 0, 0);
+    let green = Color::rgb8(0, 128, 0);
+    // `.inner` is one step from `p`, `.outer` is two, so `.inner` wins.
+    let inner_first = "@scope (.inner) { p { color: green } } @scope (.outer) { p { color: red } }";
+    let outer_first = "@scope (.outer) { p { color: red } } @scope (.inner) { p { color: green } }";
+    assert_eq!(color_of(inner_first), green);
+    assert_eq!(color_of(outer_first), green);
+    assert_ne!(color_of(outer_first), red);
+}
+
+#[test]
+fn a_scoped_rule_beats_a_more_specific_unscoped_rule() {
+    // Proximity ranks before specificity: the scoped `p` (0,0,1) beats the
+    // unscoped `div p` (0,0,2). Unscoped rules have infinite proximity.
+    let css = "div p { color: blue } @scope (.outer) { p { color: red } }";
+    assert_eq!(color_of(css), Color::rgb8(255, 0, 0));
+    // Without any scope, specificity decides as before.
+    assert_eq!(
+        color_of("p { color: red } div p { color: blue }"),
+        Color::rgb8(0, 0, 255)
+    );
+}
+
+#[test]
+fn the_stylesheet_count_is_bounded_and_the_overflow_is_reported() {
+    use tpt_css::{ParseLimits, StylesheetLimitExceeded};
+    let config = ResolverConfig {
+        limits: ParseLimits {
+            max_stylesheets: 1,
+            ..ParseLimits::default()
+        },
+        ..ResolverConfig::default()
+    };
+    let mut r = StyleResolver::new(config);
+    let first = r.try_add_stylesheet(
+        parse_sheet("child { margin-left: 1px }").stylesheet,
+        Origin::Author,
+    );
+    assert!(first.is_ok());
+    let second = r.try_add_stylesheet(
+        parse_sheet("child { margin-left: 2px }").stylesheet,
+        Origin::Author,
+    );
+    assert_eq!(second, Err(StylesheetLimitExceeded { limit: 1 }));
+    // The sheet that was refused has no effect on the result.
+    let (t, _, child) = chain();
+    let map = r.resolve(&t, &Environment::default());
+    assert!(px_near(
+        style_of(&map, child).raw(lookup("margin-left").unwrap()),
+        1.0
+    ));
+}

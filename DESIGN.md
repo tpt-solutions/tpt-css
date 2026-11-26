@@ -318,15 +318,36 @@ These numbers come from the ignored tests in `tests/integration/perf.rs`, run wi
 `cargo test --release --test integration -- --ignored --nocapture`. They are
 engineering measurements, not claims about other machines (spec 21.1).
 
-- Tokenizer: about 9.7 million tokens per second.
-- Static tree of 10,000 elements: full resolve about 46 ms. A local restyle that
-  changes one element with a subject-only rule restyles 1 element, but takes about
-  32 ms, because `restyle` returns the whole map by value and copying it dominates
-  the time. Returning a shared map is the fix, and it is an API change (open item).
+- Tokenizer: about 9.8 million tokens per second.
+- Static tree of 10,000 elements: full resolve about 44 ms. A local restyle that
+  changes one element with a subject-only rule restyles 1 element and takes about
+  16 ms. It was 32 ms before the restyle copied the cached map once instead of
+  twice. The copy still dominates; returning a shared map is the next fix, and it
+  is an API change (open item).
+
+### Later additions (this batch)
+
+12. **Scope proximity ranks after inline and before specificity**, following the
+    key in `spec.txt` 13.3. A scoped rule's proximity is the number of ancestor
+    steps from the element up to its scope root. An unscoped rule has infinite
+    proximity, so a scoped rule beats a more specific unscoped rule. This is our
+    reading of Cascade 6; it needs review against the spec text.
+13. **Calc nesting is checked against `max_calc_depth`** where declarations enter
+    the engine: at stylesheet parse (both top-level and nested rules) and after
+    `var()` substitution at computed time. The value parser's own bound stays at
+    32, so a configured value above 32 does not raise it.
+14. **Stylesheet count is bounded** by `max_stylesheets`. `try_add_stylesheet`
+    reports the limit; `add_stylesheet` keeps its signature and returns an id that
+    matches no sheet when the limit is reached.
+15. **Media features added:** `prefers-contrast`, `dynamic-range`, `update`, and
+    `resolution` (converted to `dppx`, with `dpi` and `dpcm` supported). The
+    environment gained the fields these read, with defaults that match a screen
+    at 1 dppx with no contrast preference. `MediaEnvironment` is no longer `Eq`,
+    because the pixel ratio is a float.
 
 ### Still open
 
-- Scope proximity (Cascade 6) and `@scope`'s proximity ordering.
+- Scope proximity is implemented (decision 12). The ordering for unscoped rules needs review against the spec text.
 - Relative color syntax, `rgb(from ...)`, and color interpolation in spaces other
   than sRGB.
 - Container units across nested containers: only the nearest size container is used.
@@ -338,4 +359,4 @@ engineering measurements, not claims about other machines (spec 21.1).
 - Fuzz targets and coverage-guided fuzzing. The randomized tests are seeded and
   deterministic, which is not the same thing.
 - The WPT subsuites, which need a separate checkout (spec 22.2).
-- Calc depth is a fixed constant in the value parsers, not a `ParseLimits` field.
+- Calc depth: the value parser keeps its own fixed bound of 32. The configured `max_calc_depth` is enforced on top of it (decision 13).
