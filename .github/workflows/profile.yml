@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Sampling profile of the resolve benchmark (DESIGN.md decision 35).
+#
+# Runs only on request (Actions > profile > Run workflow), because it is slow and
+# is not a gate. Linux-only: samply uses perf events, which this machine lacks.
+# The profile and the timing log are uploaded as the `resolve-profile` artifact.
+name: profile
+
+on:
+  workflow_dispatch:
+
+jobs:
+  resolve-profile:
+    runs-on: ubuntu-latest
+    env:
+      # Keep debug symbols in the release test binary so the profile names functions.
+      CARGO_PROFILE_RELEASE_DEBUG: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install samply
+        run: cargo install samply --locked
+      - name: Allow perf events for the runner user
+        run: sudo sysctl -w kernel.perf_event_paranoid=1
+      - name: Build the release integration tests
+        run: cargo test --release --test integration --no-run
+      - name: Find the test binary
+        id: bin
+        run: |
+          BIN=$(cargo test --release --test integration --no-run --message-format=json 2>/dev/null \
+            | jq -r 'select(.executable != null and .target.name == "integration") | .executable' | head -1)
+          echo "path=$BIN" >> "$GITHUB_OUTPUT"
+      - name: Record the resolve benchmark
+        run: |
+          mkdir -p profile
+          samply record --save-only -o profile/resolve.json.gz -- \
+            "${{ steps.bin.outputs.path }}" resolve_split --ignored --nocapture \
+            | tee profile/timings.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: resolve-profile
+          path: profile/
