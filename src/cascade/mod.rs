@@ -4,9 +4,8 @@
 //! Cascade (spec 13): origin, importance, layers, inline style, specificity,
 //! and source order.
 //!
-//! Scope proximity (Cascade 6, `@scope`) is not implemented yet. The key has
-//! the same shape as spec 13.3, so it can be added between the layer and
-//! specificity fields.
+//! Scope proximity (Cascade 6, `@scope`) is part of the key, after specificity
+//! (DESIGN.md decision 12).
 
 pub mod order;
 pub mod origin;

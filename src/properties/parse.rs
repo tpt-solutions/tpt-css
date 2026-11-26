@@ -8,7 +8,7 @@
 //! do not match the grammar. Values that contain `var()` are not parsed here:
 //! the style layer substitutes them first and parses the result later.
 
-use super::registry::{Grammar, PropertySpec};
+use super::registry::{Grammar, PropertySpec, FONT_STRETCH_KEYWORDS};
 use crate::syntax::{trim_whitespace, ComponentValue, NumericType, TokenKind};
 use crate::values::color::parse_color;
 use crate::values::length::parse_length_percentage;
@@ -103,6 +103,9 @@ pub fn parse_property_value(
         Grammar::Content => keyword(values, &["normal", "none"]).or_else(|| parse_content(values)),
         Grammar::Opacity => number_or_percent(values).map(|v| Value::Number(v.clamp(0.0, 1.0))),
         Grammar::BorderRadius => parse_border_radius(values),
+        Grammar::FontStretch => {
+            keyword(values, FONT_STRETCH_KEYWORDS).or(font_stretch_percentage(values))
+        }
         Grammar::Integer { keywords } => {
             keyword(values, keywords).or_else(|| integer(values).map(|n| Value::Number(n as f64)))
         }
@@ -205,6 +208,17 @@ fn parse_font_family(values: &[ComponentValue]) -> Option<Value> {
 }
 
 /// One or more strings, separated by whitespace (the `content` grammar).
+/// A single non-negative percentage, for `font-stretch`.
+fn font_stretch_percentage(values: &[ComponentValue]) -> Option<Value> {
+    match values {
+        [ComponentValue::Token(t)] => match t.kind {
+            TokenKind::Percentage(p) if p >= 0.0 => Some(Value::Percentage(p)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// One or two non-negative lengths or percentages: horizontal, then vertical.
 /// Equal values collapse to one, so a circular radius is a plain value.
 fn parse_border_radius(values: &[ComponentValue]) -> Option<Value> {

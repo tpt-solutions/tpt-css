@@ -59,6 +59,8 @@ pub enum Grammar {
     Content,
     /// `opacity`: a number, clamped to `[0, 1]`. Percentages are accepted.
     Opacity,
+    /// `font-stretch`: one of the keywords, or a non-negative percentage.
+    FontStretch,
     /// A corner radius: one or two non-negative lengths or percentages
     /// (horizontal, then vertical). Two equal values are stored as one.
     BorderRadius,
@@ -152,6 +154,19 @@ const BORDER_STYLE_KEYWORDS: &[&str] = &[
 const BOX_SIZING_KEYWORDS: &[&str] = &["content-box", "border-box"];
 const OVERFLOW_KEYWORDS: &[&str] = &["visible", "hidden", "clip", "scroll", "auto"];
 const POSITION_KEYWORDS: &[&str] = &["static", "relative", "absolute", "fixed", "sticky"];
+/// `font-stretch` keywords (CSS Fonts 4 section 2.2). A percentage is also accepted.
+pub(crate) const FONT_STRETCH_KEYWORDS: &[&str] = &[
+    "normal",
+    "ultra-condensed",
+    "extra-condensed",
+    "condensed",
+    "semi-condensed",
+    "semi-expanded",
+    "expanded",
+    "extra-expanded",
+    "ultra-expanded",
+];
+
 const VERTICAL_ALIGN_KEYWORDS: &[&str] = &[
     "baseline",
     "sub",
@@ -911,6 +926,14 @@ pub const PROPERTIES: &[PropertySpec] = &[
         initial: Initial::Keyword("auto"),
         grammar: Grammar::Keywords(&["auto", "all", "none"]),
         spec_url: CSS_TEXT_DECOR,
+    },
+    // 86
+    PropertySpec {
+        name: "font-stretch",
+        inherited: true,
+        initial: Initial::Keyword("normal"),
+        grammar: Grammar::FontStretch,
+        spec_url: CSS_FONTS,
     },
 ];
 
