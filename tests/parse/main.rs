@@ -218,3 +218,24 @@ fn deep_nesting_drops_the_sheet_with_a_diagnostic() {
 }
 
 mod m2;
+
+#[test]
+fn comment_spans_are_kept_only_when_asked_for() {
+    let css = "/* a */ p { color: red } /* b */";
+    let off = tpt_css::parse_stylesheet(css, ParseOptions::default());
+    assert!(off.comments.is_empty());
+
+    let on = tpt_css::parse_stylesheet(
+        css,
+        ParseOptions {
+            preserve_comments: true,
+            ..Default::default()
+        },
+    );
+    let texts: Vec<&str> = on
+        .comments
+        .iter()
+        .map(|s| &css[s.start as usize..s.end as usize])
+        .collect();
+    assert_eq!(texts, vec!["/* a */", "/* b */"]);
+}

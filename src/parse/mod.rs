@@ -32,6 +32,9 @@ pub struct ParseOptions {
     pub source: SourceId,
     /// Limits applied while parsing.
     pub limits: ParseLimits,
+    /// Keep the source span of every comment in `ParsedStylesheet::comments`.
+    /// Off by default: comments are not needed for style resolution.
+    pub preserve_comments: bool,
 }
 
 impl Default for ParseOptions {
@@ -39,6 +42,7 @@ impl Default for ParseOptions {
         ParseOptions {
             source: SourceId(0),
             limits: ParseLimits::default(),
+            preserve_comments: false,
         }
     }
 }

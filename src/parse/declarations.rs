@@ -83,6 +83,7 @@ pub(crate) fn parse_block_contents(
         }
         match parse_declaration(chunk) {
             Ok(decl) => {
+                check_property_name(&decl, diagnostics);
                 if within_math_depth(&decl, limits, diagnostics) {
                     out.push(decl);
                 }
@@ -91,6 +92,28 @@ pub(crate) fn parse_block_contents(
         }
     }
     out
+}
+
+/// Reports a declaration whose property is not in the registry (decision 36).
+/// The declaration is still dropped by the cascade, as the spec requires for
+/// unknown names. Custom properties (`--*`) are never reported.
+pub(crate) fn check_property_name(decl: &Declaration, diagnostics: &mut Vec<Diagnostic>) {
+    if decl.property.starts_with("--")
+        || crate::properties::registry::lookup(&decl.property).is_some()
+        || crate::properties::shorthand::shorthand_index(&decl.property).is_some()
+    {
+        return;
+    }
+    diagnostics.push(Diagnostic {
+        severity: Severity::Info,
+        code: DiagnosticCode::UnknownProperty,
+        span: decl.span,
+        message: format!(
+            "property `{}` is not implemented by this engine; the declaration is ignored",
+            decl.property
+        ),
+        spec_url: Some(DECLARATIONS_URL),
+    });
 }
 
 pub(crate) fn parse_declaration(values: &[ComponentValue]) -> Result<Declaration, Diagnostic> {

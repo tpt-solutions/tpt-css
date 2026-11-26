@@ -17,6 +17,9 @@ pub struct ParsedStylesheet {
     pub stylesheet: Stylesheet,
     /// Diagnostics. Not required for style resolution.
     pub diagnostics: Vec<Diagnostic>,
+    /// Source spans of the comments, in order. Empty unless
+    /// [`ParseOptions::preserve_comments`] is set.
+    pub comments: Vec<Span>,
 }
 
 /// Parses a stylesheet with spec-defined error recovery.
@@ -50,6 +53,7 @@ pub fn parse_stylesheet(input: &str, options: ParseOptions) -> ParsedStylesheet 
             return ParsedStylesheet {
                 stylesheet: Stylesheet::default(),
                 diagnostics,
+                comments: keep_comments(&options, &tokenized),
             };
         }
     };
@@ -58,6 +62,16 @@ pub fn parse_stylesheet(input: &str, options: ParseOptions) -> ParsedStylesheet 
     ParsedStylesheet {
         stylesheet: Stylesheet { rules },
         diagnostics,
+        comments: keep_comments(&options, &tokenized),
+    }
+}
+
+/// The comment spans, when the caller asked for them.
+fn keep_comments(options: &ParseOptions, tokenized: &crate::syntax::Tokenized) -> Vec<Span> {
+    if options.preserve_comments {
+        tokenized.comments.clone()
+    } else {
+        Vec::new()
     }
 }
 

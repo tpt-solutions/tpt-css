@@ -651,6 +651,7 @@ fn push_declaration(
     }
     match super::declarations::parse_declaration(chunk) {
         Ok(decl) => {
+            super::declarations::check_property_name(&decl, diagnostics);
             if within_math_depth(&decl, limits, diagnostics) {
                 out.push(decl);
             }

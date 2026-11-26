@@ -23,6 +23,8 @@ pub struct Tokenized {
     pub tokens: Vec<Token>,
     /// True when a limit stopped tokenization early.
     pub limit_exceeded: bool,
+    /// The source range of every comment, in order. Comments produce no tokens.
+    pub comments: Vec<Span>,
 }
 
 /// Tokenizes `input` according to `limits`.
@@ -30,6 +32,7 @@ pub fn tokenize(source: SourceId, input: &str, limits: &ParseLimits) -> Tokenize
     let eof_span = Span::new(source, 0, 0);
     if input.len() > limits.max_input_bytes || input.len() > u32::MAX as usize {
         return Tokenized {
+            comments: Vec::new(),
             tokens: vec![Token {
                 kind: TokenKind::Eof,
                 span: eof_span,
@@ -45,11 +48,14 @@ pub fn tokenize(source: SourceId, input: &str, limits: &ParseLimits) -> Tokenize
     };
     let mut tokens = Vec::new();
     let mut limit_exceeded = false;
+    let mut comments = Vec::new();
 
     loop {
         // Comments produce no tokens (CSS Syntax 3, comments).
         while t.rest().starts_with("/*") {
+            let start = t.pos as u32;
             t.skip_comment();
+            comments.push(Span::new(source, start, t.pos as u32));
         }
         let start = t.pos;
         if t.pos >= t.src.len() {
@@ -77,6 +83,7 @@ pub fn tokenize(source: SourceId, input: &str, limits: &ParseLimits) -> Tokenize
     Tokenized {
         tokens,
         limit_exceeded,
+        comments,
     }
 }
 
