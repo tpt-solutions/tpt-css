@@ -16,7 +16,9 @@
 //! A [`SiblingCache`] holds each parent's element children and their positions,
 //! built once per style pass, so `:nth-child()` and `+` cost O(log siblings) per
 //! node. Without a cache, the matcher builds the same index for each check.
-//! `~`, `:nth-of-type()`, and `:nth-child(... of S)` still walk the list.
+//! `:nth-child(... of S)` also caches, per parent and list, which siblings match S,
+//! so each sibling is tested once per pass. `~` walks preceding siblings per node
+//! until a match; the measured `li ~ li` case is linear (DESIGN.md section 8).
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -140,12 +142,32 @@ impl Siblings {
 #[derive(Default)]
 pub(crate) struct SiblingCache {
     parents: RefCell<BTreeMap<NodeId, Rc<Siblings>>>,
+    /// Which siblings match a `:nth-child(of S)` list, per parent and list.
+    of_indexes: RefCell<BTreeMap<(NodeId, usize), Rc<OfIndex>>>,
+}
+
+/// The siblings of one parent that match an `of S` list, with each one's
+/// 0-based place among them.
+struct OfIndex {
+    positions: BTreeMap<NodeId, usize>,
+    count: usize,
 }
 
 impl SiblingCache {
     /// Forgets every parent. Call this when the tree may have changed.
     pub(crate) fn clear(&self) {
         self.parents.borrow_mut().clear();
+        self.of_indexes.borrow_mut().clear();
+    }
+
+    fn of_index(&self, parent: NodeId, key: usize) -> Option<Rc<OfIndex>> {
+        self.of_indexes.borrow().get(&(parent, key)).map(Rc::clone)
+    }
+
+    fn store_of_index(&self, parent: NodeId, key: usize, index: OfIndex) {
+        self.of_indexes
+            .borrow_mut()
+            .insert((parent, key), Rc::new(index));
     }
 
     fn get<T: StyleTree>(&self, tree: &T, parent: NodeId) -> Rc<Siblings> {
@@ -562,26 +584,53 @@ impl<'a, T: StyleTree> Matcher<'a, T> {
                 }
             }
             Some(of) => {
-                // The predicate depends on the matcher, so each sibling is tested.
-                let mut matching = Vec::with_capacity(sibs.elements.len());
-                for &sibling in sibs.elements.iter() {
-                    if self.list_matches(sibling, of) {
-                        matching.push(sibling);
-                    }
-                }
-                match matching.iter().position(|s| *s == node) {
-                    Some(p) => {
-                        if nth.last {
-                            matching.len() - p
-                        } else {
-                            p + 1
-                        }
-                    }
-                    None => return false,
+                let Some((p, count)) = self.of_position(node, &sibs, of) else {
+                    return false;
+                };
+                if nth.last {
+                    count - p
+                } else {
+                    p + 1
                 }
             }
         };
         anb_matches(position as i64, nth.a, nth.b)
+    }
+
+    /// The 0-based place of `node` among the siblings that match `of`, and how
+    /// many siblings match. `None` if `node` does not match `of`.
+    ///
+    /// With a sibling cache, the result for each parent and list is computed
+    /// once per style pass, so `:nth-child(of S)` on a wide list costs one
+    /// match per sibling in total, not one per element (quadratic).
+    fn of_position(
+        &mut self,
+        node: NodeId,
+        sibs: &Siblings,
+        of: &SelectorList,
+    ) -> Option<(usize, usize)> {
+        let parent = self.tree.parent(node);
+        // The list lives in a stylesheet that does not move during a pass, so its
+        // address identifies it.
+        let key = (of as *const SelectorList) as usize;
+        if let (Some(cache), Some(parent)) = (self.siblings, parent) {
+            if let Some(index) = cache.of_index(parent, key) {
+                return index.positions.get(&node).map(|&p| (p, index.count));
+            }
+        }
+        let mut positions = BTreeMap::new();
+        let mut count = 0;
+        for &sibling in sibs.elements.iter() {
+            if self.list_matches(sibling, of) {
+                positions.insert(sibling, count);
+                count += 1;
+            }
+        }
+        let found = positions.get(&node).map(|&p| (p, count));
+        if let (Some(cache), Some(parent)) = (self.siblings, parent) {
+            cache.store_of_index(parent, key, OfIndex { positions, count });
+        }
+        found
     }
 
     fn pseudo_class_matches(&self, node: NodeId, pseudo: PseudoClass) -> bool {

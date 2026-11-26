@@ -323,8 +323,10 @@ engineering measurements, not claims about other machines (spec 21.1).
 - Sibling constructs, each alone (`sibling_constructs_scale_separately`), 2,000 and
   8,000 `li` siblings. `li ~ li`: 16 ms and 60 ms, ratio 3.8. `li:nth-of-type(3n)`:
   14 ms and 60 ms, ratio 4.3. These two scale linearly. `li:nth-child(2n of .x)`:
-  31 ms and 357 ms, ratio 11.7. Close to quadratic, because `of S` still tests each
-  sibling against S. This is the next performance task.
+  31 ms and 357 ms, ratio 11.7, before the per-parent `of S` index. After it
+  (decision 34): 16 ms and 66 ms, ratio 4.0. Each sibling is now tested against S
+  once per pass, not once per element. `~` and `:nth-of-type()` are also linear in
+  these runs (4.0 and 3.5).
 - Static tree of 10,000 elements: full resolve about 45 to 50 ms (two runs). A local restyle that
   changes one element with a subject-only rule restyles 1 element and takes about
   34 µs, since `restyle` returns a reference into the cache (decision 16). It was
@@ -469,6 +471,13 @@ engineering measurements, not claims about other machines (spec 21.1).
     which compare rendered pixels, and the rest are testharness tests that need a
     JavaScript DOM with `getComputedStyle`. The engine has no renderer and no DOM
     adapter. The item is closed, not deferred, until one of those exists.
+34. **`:nth-child(of S)` uses a per-parent index.** The sibling cache also records,
+    per parent and selector list, which siblings match S and each one's place among
+    them. The list's address identifies it. The cache is cleared with the sibling
+    index at the start of each pass, so the index never outlives a change to the
+    tree or the sheets. Without a cache (a one-off match), the index is built per
+    call, as before. Measured in DESIGN.md section 8: the growth ratio for 4 times
+    the siblings fell from 11.7 to 4.0.
 
 ### Still open
 
@@ -486,10 +495,9 @@ engineering measurements, not claims about other machines (spec 21.1).
   deterministic, which is not the same thing.
 - The WPT subsuites are out of scope (decision 33).
 - Calc depth: the configured `max_calc_depth` is the effective limit (decision 13). The value parser recurses up to 256, the default component nesting limit.
-- `:nth-child(of S)` still tests each sibling, because its predicate depends on the
-  matcher (decision 25).
 - Long-tail properties still missing: multi-value grammars (`transition`, `flex`,
-  `grid`, `border-radius`, `box-shadow`), and angle, time, and resolution values.
+  `grid`, `box-shadow`), and angle, time, and resolution values. `border-radius`
+  is done, including the elliptical form (`Value::Elliptical`).
 - Full resolve grew by roughly 35 to 60 percent in the runs here when the registry went from 50 to 80
   properties, because every element computes every registered property. The
   timings in this section were taken on a machine that varied between runs.
