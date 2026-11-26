@@ -205,6 +205,9 @@ pub struct StyleResolver {
     pub(crate) cache: Option<Cache>,
     pub(crate) dirty: BTreeSet<NodeId>,
     pub(crate) full_dirty: bool,
+    /// Lowercased attribute names that some selector can read, computed on
+    /// demand and reset when the sheets change (see `invalidation.rs`).
+    pub(crate) attr_deps: Option<BTreeSet<String>>,
     pub(crate) last_restyled: usize,
     /// Cascade layers in order of first declaration (spec 13.4).
     pub(crate) layers: BTreeMap<String, usize>,
@@ -283,6 +286,7 @@ impl StyleResolver {
         let mut rules = Vec::new();
         self.flatten(sheet.rules, &FlattenCtx::default(), &mut rules);
         self.sheets.push(LoadedSheet { id, origin, rules });
+        self.attr_deps = None;
         self.full_dirty = true;
         Ok(id)
     }
@@ -290,6 +294,7 @@ impl StyleResolver {
     /// Removes a stylesheet. Unknown ids are ignored.
     pub fn remove_stylesheet(&mut self, id: SheetId) {
         self.sheets.retain(|s| s.id != id);
+        self.attr_deps = None;
         self.full_dirty = true;
     }
 

@@ -47,7 +47,7 @@ fn an_attribute_change_restyles_only_the_changed_element_when_no_rule_is_structu
 
     t.add_class(divs[7], "hot");
     r.invalidate(&t, StyleChange::AttributeChanged(divs[7]));
-    let map = r.restyle(&t, &env);
+    let map = r.restyle(&t, &env).clone();
 
     // div, span, and em under it: three elements, not the whole 151-element tree.
     assert_eq!(r.last_restyle_count(), 3);
@@ -72,7 +72,7 @@ fn a_state_change_restyles_the_element_and_its_subtree() {
     let map = r.restyle(&t, &env);
 
     assert_eq!(map.get(divs[3]).unwrap().color(), Color::rgb8(0, 0, 255));
-    assert_eq!(map, full(css, &t, &env));
+    assert_eq!(*map, full(css, &t, &env));
 }
 
 #[test]
@@ -87,7 +87,7 @@ fn inline_style_changes_are_restyled() {
     r.invalidate(&t, StyleChange::InlineStyleChanged(divs[0]));
     let map = r.restyle(&t, &env);
     assert_eq!(map.get(divs[0]).unwrap().color(), Color::rgb8(0, 255, 0));
-    assert_eq!(map, full(css, &t, &env));
+    assert_eq!(*map, full(css, &t, &env));
 }
 
 #[test]
@@ -102,7 +102,7 @@ fn sibling_sensitive_rules_restyle_the_parent_subtree() {
 
     t.add_class(divs[10], "mark");
     r.invalidate(&t, StyleChange::AttributeChanged(divs[10]));
-    let map = r.restyle(&t, &env);
+    let map = r.restyle(&t, &env).clone();
 
     assert!(r.last_restyle_count() > 3, "siblings must be restyled");
     assert_eq!(map, full(css, &t, &env));
@@ -127,7 +127,7 @@ fn an_environment_change_forces_a_full_resolve() {
 
     let second = r.restyle(&t, &narrow);
     assert_eq!(second.get(divs[0]).unwrap().raw(margin), &Value::px(0.0));
-    assert_eq!(second, full(css, &t, &narrow));
+    assert_eq!(*second, full(css, &t, &narrow));
 }
 
 #[test]
@@ -157,7 +157,7 @@ fn restyle_without_a_previous_result_is_a_full_resolve() {
     let (t, _) = big_tree();
     let mut r = resolver_for(css);
     let map = r.restyle(&t, &env);
-    assert_eq!(map, full(css, &t, &env));
+    assert_eq!(*map, full(css, &t, &env));
     assert_eq!(
         r.last_restyle_count(),
         151,
@@ -173,7 +173,7 @@ fn a_restyle_with_nothing_dirty_reuses_the_previous_result() {
     let mut r = resolver_for(css);
     let first = r.resolve(&t, &env);
     let again = r.restyle(&t, &env);
-    assert_eq!(first, again);
+    assert_eq!(first, *again);
     assert_eq!(r.last_restyle_count(), 0);
 }
 
@@ -189,7 +189,7 @@ fn an_unchanged_style_stops_the_restyle_when_rules_are_subject_only() {
     // descendants need no restyle.
     t.add_class(divs[4], "unrelated");
     r.invalidate(&t, StyleChange::AttributeChanged(divs[4]));
-    let map = r.restyle(&t, &env);
+    let map = r.restyle(&t, &env).clone();
     assert_eq!(
         r.last_restyle_count(),
         1,
@@ -208,7 +208,7 @@ fn a_changed_style_propagates_to_the_subtree() {
 
     t.set_inline(divs[4], "margin-left: 5px");
     r.invalidate(&t, StyleChange::InlineStyleChanged(divs[4]));
-    let map = r.restyle(&t, &env);
+    let map = r.restyle(&t, &env).clone();
     // The div changed, so its span is restyled. The span is unchanged (margins are
     // not inherited), so the em below it is skipped by the equality cutoff.
     assert_eq!(r.last_restyle_count(), 2, "the div and its span");
@@ -225,5 +225,80 @@ fn a_has_rule_forces_a_full_restyle_on_attribute_changes() {
     t.add_class(divs[0], "unrelated");
     r.invalidate(&t, StyleChange::AttributeChanged(divs[0]));
     let map = r.restyle(&t, &env);
+    assert_eq!(*map, full(css, &t, &env));
+}
+
+#[test]
+fn an_attribute_that_no_selector_reads_restyles_nothing() {
+    let css = ".hot { color: red } [data-live] { margin-left: 2px }";
+    let env = Environment::default();
+    let (mut t, divs) = big_tree();
+    let mut r = resolver_for(css);
+    let _ = r.resolve(&t, &env);
+
+    t.set_attr(divs[2], "data-other", "1");
+    r.invalidate(
+        &t,
+        StyleChange::AttributeNamed(divs[2], "data-other".to_string()),
+    );
+    let map = r.restyle(&t, &env).clone();
+    assert_eq!(r.last_restyle_count(), 0, "no selector reads data-other");
     assert_eq!(map, full(css, &t, &env));
+}
+
+#[test]
+fn an_attribute_that_a_selector_reads_restyles_the_element() {
+    let css = "[data-live] { margin-left: 2px }";
+    let env = Environment::default();
+    let (mut t, divs) = big_tree();
+    let mut r = resolver_for(css);
+    let _ = r.resolve(&t, &env);
+
+    // Attribute names are case-insensitive, so the change may use another case.
+    t.set_attr(divs[4], "DATA-LIVE", "yes");
+    r.invalidate(
+        &t,
+        StyleChange::AttributeNamed(divs[4], "DATA-LIVE".to_string()),
+    );
+    let map = r.restyle(&t, &env).clone();
+    assert_eq!(r.last_restyle_count(), 1);
+    assert_eq!(map, full(css, &t, &env));
+}
+
+#[test]
+fn attributes_read_inside_negations_and_scope_roots_count() {
+    let env = Environment::default();
+    for (css, attr) in [
+        ("div:not([hidden]) { margin-left: 2px }", "hidden"),
+        (
+            "@scope ([data-root]) { span { margin-left: 2px } }",
+            "data-root",
+        ),
+        ("div:has([data-x]) { margin-left: 2px }", "data-x"),
+    ] {
+        let (mut t, divs) = big_tree();
+        let mut r = resolver_for(css);
+        let _ = r.resolve(&t, &env);
+        t.set_attr(divs[1], attr, "1");
+        r.invalidate(&t, StyleChange::AttributeNamed(divs[1], attr.to_string()));
+        let map = r.restyle(&t, &env).clone();
+        assert!(r.last_restyle_count() > 0, "{attr} is read by {css}");
+        assert_eq!(map, full(css, &t, &env), "{css}");
+    }
+}
+
+#[test]
+fn style_and_lang_changes_are_always_relevant() {
+    let css = "div { margin-left: 1px }";
+    let env = Environment::default();
+    let (mut t, divs) = big_tree();
+    let mut r = resolver_for(css);
+    let _ = r.resolve(&t, &env);
+    t.set_attr(divs[0], "style", "margin-left: 9px");
+    r.invalidate(
+        &t,
+        StyleChange::AttributeNamed(divs[0], "style".to_string()),
+    );
+    let _ = r.restyle(&t, &env);
+    assert!(r.last_restyle_count() > 0);
 }

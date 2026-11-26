@@ -110,9 +110,9 @@ fn a_custom_state_changes_the_component_and_restyles_incrementally() {
     a.tree.set_state(a.button, StateBits::DISABLED);
     r.invalidate(&a.tree, StyleChange::StateChanged(a.button));
     let map = r.restyle(&a.tree, &env);
-    assert_eq!(style_of(&map, a.button).color(), Color::rgb8(128, 128, 128));
+    assert_eq!(style_of(map, a.button).color(), Color::rgb8(128, 128, 128));
     assert_eq!(
-        map,
+        *map,
         resolver().resolve(&a.tree, &env),
         "restyle matches a full resolve"
     );

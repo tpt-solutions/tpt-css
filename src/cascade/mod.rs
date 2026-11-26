@@ -46,8 +46,8 @@ pub fn layer_rank(index: usize, important: bool) -> u32 {
 /// 1. origin and importance (`Origin::precedence`), higher wins
 /// 2. layer rank (`layer_rank`), higher wins
 /// 3. inline style over non-inline at the same origin and importance (spec 13.5)
-/// 4. scope proximity, lower wins (Cascade 6)
-/// 5. specificity, higher wins
+/// 4. specificity, higher wins
+/// 5. scope proximity, lower wins (Cascade 6, after specificity)
 /// 6. declaration order, later wins
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CascadeKey {
@@ -82,8 +82,8 @@ impl Ord for CascadeKey {
             .cmp(&other.rank())
             .then(self.layer.cmp(&other.layer))
             .then(self.inline.cmp(&other.inline))
-            .then(other.scope_proximity.cmp(&self.scope_proximity))
             .then(self.specificity.cmp(&other.specificity))
+            .then(other.scope_proximity.cmp(&self.scope_proximity))
             .then(self.order.cmp(&other.order))
     }
 }

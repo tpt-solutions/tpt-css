@@ -146,7 +146,7 @@ All decisions are recorded in DESIGN.md section 2.
 
 - [x] `@layer` with first-declaration order and layer cascade rules (spec 13.4). Tests: `tests/cascade/layers.rs`.
 - [x] `@supports` using engine's own capabilities, `selector()`, `not`, `and`, `or` (spec 16.4). Evaluated at parse time.
-- [x] `@scope`, `:scope`, Cascade 6 scope proximity (spec 13.3). Proximity ranks after inline and before specificity, as in the key in `spec.txt` 13.3. An unscoped rule has infinite proximity; that reading of Cascade 6 needs review against the spec text (`tests/style/m3.rs`).
+- [x] `@scope`, `:scope`, Cascade 6 scope proximity (spec 13.3). Proximity ranks after specificity, following the sorting order of the current Cascade 6 draft. `spec.txt` 13.3 puts it before specificity, which needs correcting there. Unscoped rules have infinite proximity (`tests/style/m3.rs`).
 - [x] CSS nesting and `&` (spec 12.3).
 - [x] `@container` foundation and `ContainerSizeProvider` (spec 16.5).
 - [x] `@property` and registered custom properties (spec 13.7).
@@ -155,7 +155,7 @@ All decisions are recorded in DESIGN.md section 2.
 - [x] Animation and transition cascade origins (spec 13.2). No animation driver exists (spec 3).
 - [x] Keyframe style resolution (`@keyframes`). `style::keyframes::value_at` interpolates numbers, lengths, percentages, and colors; other values change at the midpoint. The host supplies the progress; there is no timeline.
 - [x] `@font-face` parsing.
-- [~] Modern color functions: `color()`, relative color syntax, `light-dark()`. `light-dark()` and `color()` in `srgb` and `srgb-linear` are done. Relative color syntax (`rgb(from ...)`) is not.
+- [~] Modern color functions: `color()`, relative color syntax, `light-dark()`. `light-dark()` and `color()` in `srgb` and `srgb-linear` are done. Relative color syntax (CSS Color 5) is done for `rgb`, `hsl`, `hwb`, `lab`, `lch`, `oklab`, and `oklch`. Relative `color()` is not (`tests/style/m3.rs`).
 - [x] Viewport and container units (spec 14.3). `cqw`, `cqh`, `cqi`, `cqb`, `cqmin`, `cqmax` resolve against the nearest size container.
 - [x] `:has()`. Relative selectors in all four combinator forms (`tests/selectors/m3.rs`).
 - [~] `:host`, `:host-context()`, `::slotted()`, `::part()`, `:state()` (spec 12.2 Tier 2). Not started; these are shadow-tree selectors and belong to M4.
@@ -170,8 +170,8 @@ All decisions are recorded in DESIGN.md section 2.
 
 - [~] Selector dependency graph (spec 12.4, 17.2). Not built. The restyle uses two conservative flags per rule: `structural` (sibling-dependent) and `needs_ancestors` (`:has()`, `:scope`, `@scope`). Each drives a wider restyle.
 - [ ] Custom property dependency graph (spec 17.2). Not started; a custom property change restyles the element it is on.
-- [~] `StyleChange` enum and `RestyleHint` (spec 17.1, 17.2). `StyleChange` exists, but `AttributeChanged` carries no attribute name, and there is no `RestyleHint` type.
-- [~] `invalidate` and `restyle` on `StyleResolver` (spec 8.2). Done, with an equality cutoff: an element whose computed style is unchanged stops the restyle, when every rule is subject-only. The restyle copies the cached map once per call (down from twice); returning a shared reference is still open.
+- [~] `StyleChange` enum and `RestyleHint` (spec 17.1, 17.2). `AttributeNamed` skips an attribute that no selector reads and style does not read directly. `AttributeChanged`, which has no name, stays conservative. There is no `RestyleHint` type.
+- [~] `invalidate` and `restyle` on `StyleResolver` (spec 8.2). Done, with an equality cutoff: an element whose computed style is unchanged stops the restyle, when every rule is subject-only. `restyle` returns a reference into the cache and copies nothing.
 - [ ] Style sharing with safe sharing key (spec 17.3). Not started.
 - [~] `:has()` invalidation graph (spec 12.4). Conservative: any attribute change restyles everything when a `:has()` rule exists.
 - [~] Media and container query invalidation (spec 16.3, 16.5). An environment change or a container provider restyles everything. No finer tracking.
@@ -182,13 +182,13 @@ All decisions are recorded in DESIGN.md section 2.
 - [x] Devtools-facing inspection data (spec 7 `diagnostics`), via `StyleResolver::inspect`.
 - [x] Visited-link privacy policy: `VisitedPolicy` (spec 20.2).
 - [~] Web profile integration tests (`--features web`). The `web` feature enables the CSSOM tests. There is no DOM adapter, so no end-to-end web test exists.
-- [~] Acceptance: incremental restyle, no full-document restyle for simple local changes. Met for subject-only rules: a local change restyles one element (`tests/integration/perf.rs`, `tests/integration/invalidation.rs`). The restyle copies the whole map once (about 16 ms for 10,000 elements, measured, down from 32 ms); returning a shared map is an open API change.
+- [~] Acceptance: incremental restyle, no full-document restyle for simple local changes. Met for subject-only rules: a local change restyles one element (`tests/integration/perf.rs`, `tests/integration/invalidation.rs`). A one-element restyle on 10,000 elements takes about 34 µs (measured, release), since `restyle` returns a reference. `resolve` still returns an owned map, which is one copy per full resolve.
 
 ## 6. M4: long-tail web compatibility (spec 24)
 
 - [ ] Long-tail selectors (spec 12.2 Tier 3): `:defined`, `:local-link`, `:current`, `:past`, `:future`, media-state pseudos, and the rest. Not started; most need host state this engine does not model.
 - [ ] Long-tail properties and advanced values (spec 15.2). Not started beyond the M1 and M2 sets.
-- [~] Advanced colors and media features (spec 14.5, 16.3). Full named color set (148), `lab()`, `lch()`, `oklab()`, `oklch()`, `color()` (srgb), `color-mix()` (srgb). Media features `resolution`, `update`, `dynamic-range`, and `prefers-contrast` are done. Relative color syntax (`rgb(from ...)`) is not: it needs forward conversions to HSL, HWB, Lab, LCh, OKLab, and OKLCh, which the engine does not have yet.
+- [~] Advanced colors and media features (spec 14.5, 16.3). Full named color set (148), `lab()`, `lch()`, `oklab()`, `oklch()`, `color()` (srgb), `color-mix()` (srgb). Relative color syntax (CSS Color 5) for `rgb`, `hsl`, `hwb`, `lab`, `lch`, `oklab`, and `oklch`. Media features `resolution`, `update`, `dynamic-range`, and `prefers-contrast` are done. Not done: relative `color()`, and color interpolation in spaces other than sRGB.
 - [ ] Shadow DOM edge cases (spec 9.3). Not started. `ShadowInfo` is part of the tree contract but nothing reads it.
 - [ ] `::part`, `::slotted`, `::highlight()` and related pseudos. Not started; the pseudo-element identities exist, but they are not parsed.
 - [~] Serialization edge cases. Canonical serialization of values, selectors, and rules; the exact CSS spelling of every edge case is not checked.

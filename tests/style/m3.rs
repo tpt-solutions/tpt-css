@@ -565,16 +565,24 @@ fn the_nearer_scope_root_wins_whatever_the_source_order() {
 }
 
 #[test]
-fn a_scoped_rule_beats_a_more_specific_unscoped_rule() {
-    // Proximity ranks before specificity: the scoped `p` (0,0,1) beats the
-    // unscoped `div p` (0,0,2). Unscoped rules have infinite proximity.
-    let css = "div p { color: blue } @scope (.outer) { p { color: red } }";
-    assert_eq!(color_of(css), Color::rgb8(255, 0, 0));
+fn specificity_decides_before_scope_proximity() {
+    // Cascade 6 sorts specificity before proximity: the more specific unscoped
+    // `div p` (0,0,2) beats the scoped `p` (0,0,1).
+    let css = "@scope (.outer) { p { color: red } } div p { color: blue }";
+    assert_eq!(color_of(css), Color::rgb8(0, 0, 255));
     // Without any scope, specificity decides as before.
     assert_eq!(
         color_of("p { color: red } div p { color: blue }"),
         Color::rgb8(0, 0, 255)
     );
+}
+
+#[test]
+fn scope_proximity_breaks_ties_before_source_order() {
+    // Equal specificity: the scoped rule wins even though the unscoped rule
+    // comes later, because an unscoped rule has infinite proximity.
+    let css = "@scope (.outer) { p { color: red } } p { color: blue }";
+    assert_eq!(color_of(css), Color::rgb8(255, 0, 0));
 }
 
 #[test]
@@ -605,4 +613,83 @@ fn the_stylesheet_count_is_bounded_and_the_overflow_is_reported() {
         style_of(&map, child).raw(lookup("margin-left").unwrap()),
         1.0
     ));
+}
+
+// ---- relative color syntax (CSS Color 5) ----------------------------------------
+
+fn close_color(a: Color, b: Color) -> bool {
+    let near = |x: f32, y: f32| (x - y).abs() < 2e-3;
+    near(a.alpha, b.alpha)
+        && a.components
+            .iter()
+            .zip(b.components.iter())
+            .all(|(x, y)| near(*x, *y))
+}
+
+#[test]
+fn relative_syntax_round_trips_every_space() {
+    // Each function, with the keywords for its own channels, must give back
+    // the origin color. This checks the forward conversions against the
+    // existing inverses.
+    let origins = [
+        ("#3a7fc2", Color::rgb8(0x3a, 0x7f, 0xc2)),
+        ("#ff8000", Color::rgb8(0xff, 0x80, 0x00)),
+        ("#808080", Color::rgb8(0x80, 0x80, 0x80)),
+        ("#102030", Color::rgb8(0x10, 0x20, 0x30)),
+        ("white", Color::rgb8(255, 255, 255)),
+        ("black", Color::rgb8(0, 0, 0)),
+    ];
+    let functions = [
+        ("rgb", "r g b"),
+        ("hsl", "h s l"),
+        ("hwb", "h w b"),
+        ("lab", "l a b"),
+        ("lch", "l c h"),
+        ("oklab", "l a b"),
+        ("oklch", "l c h"),
+    ];
+    for (origin, want) in origins {
+        for (function, channels) in functions {
+            let css = format!("p {{ color: {function}(from {origin} {channels}) }}");
+            let got = color_of(&css);
+            assert!(
+                close_color(got, want),
+                "{function}(from {origin} {channels}) gave {got:?}, want {want:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_alpha_defaults_to_the_origin_and_can_be_set() {
+    assert!(
+        (color_of("p { color: rgb(from rgb(0 0 255 / 0.25) r g b) }").alpha - 0.25).abs() < 1e-6
+    );
+    assert!((color_of("p { color: rgb(from red r g b / 0.5) }").alpha - 0.5).abs() < 1e-6);
+}
+
+#[test]
+fn keywords_take_math_and_percentages() {
+    // r = 255 halved is 127.5, which is 0.5 of full scale.
+    let half = color_of("p { color: rgb(from red calc(r * 0.5) g b) }");
+    assert!((half.components[0] - 0.5).abs() < 1e-3);
+    assert!(half.components[1].abs() < 1e-6);
+    // 50% of 255 for red.
+    let pct = color_of("p { color: rgb(from black 50% 0 0) }");
+    assert!((pct.components[0] - 0.5).abs() < 1e-3);
+    // Lighter red: hsl(0 100% 70%), which is (1, 0.4, 0.4).
+    let light = color_of("p { color: hsl(from #ff0000 h s calc(l + 20)) }");
+    assert!((light.components[0] - 1.0).abs() < 1e-3);
+    assert!((light.components[1] - 0.4).abs() < 1e-3);
+    assert!((light.components[2] - 0.4).abs() < 1e-3);
+}
+
+#[test]
+fn malformed_relative_colors_are_dropped() {
+    let initial = color_of("p { }");
+    // Too few channels, and a keyword that the space does not have.
+    assert_eq!(color_of("p { color: rgb(from red r g) }"), initial);
+    assert_eq!(color_of("p { color: rgb(from red x g b) }"), initial);
+    // A missing origin.
+    assert_eq!(color_of("p { color: rgb(from r g b) }"), initial);
 }

@@ -5,10 +5,11 @@
 //! `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()`, `rgba()`, `hsl()`, `hsla()`,
 //! `hwb()`, `lab()`, `lch()`, `oklab()`, `oklch()`, `color()` in `srgb` and
 //! `srgb-linear`, and `color-mix()` in `srgb`. Every space is converted to sRGB at
-//! parse time. Relative color syntax (`rgb(from ...)`) is not implemented.
+//! parse time. Relative color syntax (`rgb(from ...)`) works for rgb, hsl, hwb, lab, lch,
+//! oklab, and oklch; `color()` does not take it.
 //! `currentcolor` is resolved by the property layer, not here.
 
-use crate::syntax::{trim_whitespace, ComponentValue, TokenKind};
+use crate::syntax::{trim_whitespace, BlockKind, ComponentValue, TokenKind};
 
 /// Color spaces. M0 supports sRGB only; the others arrive with the M1 color
 /// functions (spec 14.5).
@@ -234,6 +235,9 @@ pub fn parse_color(values: &[ComponentValue]) -> Option<Color> {
             TokenKind::Hash { value, .. } => parse_hex(value),
             _ => None,
         },
+        ComponentValue::Function(f) if starts_with_from(&f.value) => {
+            parse_relative(&f.name.to_ascii_lowercase(), &f.value)
+        }
         ComponentValue::Function(f) => match f.name.to_ascii_lowercase().as_str() {
             "rgb" | "rgba" => parse_rgb_arguments(&f.value),
             "hsl" | "hsla" => parse_hsl(&f.value),
@@ -716,4 +720,457 @@ fn from_linear_rgb_clamped(linear: [f64; 3], alpha: Option<&ComponentValue>) -> 
         components: [srgb[0] as f32, srgb[1] as f32, srgb[2] as f32],
         alpha: alpha_of(alpha.and_then(as_arg)),
     }
+}
+
+// ---- relative color syntax (CSS Color 5) ------------------------------------------
+
+/// The color functions that accept relative syntax (`rgb(from <color> ...)`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Space {
+    Rgb,
+    Hsl,
+    Hwb,
+    Lab,
+    Lch,
+    Oklab,
+    Oklch,
+}
+
+impl Space {
+    fn of(name: &str) -> Option<Space> {
+        Some(match name {
+            "rgb" | "rgba" => Space::Rgb,
+            "hsl" | "hsla" => Space::Hsl,
+            "hwb" => Space::Hwb,
+            "lab" => Space::Lab,
+            "lch" => Space::Lch,
+            "oklab" => Space::Oklab,
+            "oklch" => Space::Oklch,
+            _ => return None,
+        })
+    }
+
+    /// The keywords that name the three channels in relative syntax.
+    fn keywords(self) -> [&'static str; 3] {
+        match self {
+            Space::Rgb => ["r", "g", "b"],
+            Space::Hsl => ["h", "s", "l"],
+            Space::Hwb => ["h", "w", "b"],
+            Space::Lab | Space::Oklab => ["l", "a", "b"],
+            Space::Lch | Space::Oklch => ["l", "c", "h"],
+        }
+    }
+
+    /// The value that 100% stands for in each channel. Hue takes no percentage
+    /// in the specification, so 360 is used only to keep the arithmetic defined.
+    fn percent_refs(self) -> [f64; 3] {
+        match self {
+            Space::Rgb => [255.0, 255.0, 255.0],
+            Space::Hsl | Space::Hwb => [360.0, 100.0, 100.0],
+            Space::Lab => [100.0, 125.0, 125.0],
+            Space::Lch => [100.0, 150.0, 360.0],
+            Space::Oklab => [1.0, 0.4, 0.4],
+            Space::Oklch => [1.0, 0.4, 360.0],
+        }
+    }
+}
+
+/// The channel values of `color` in `space`, in the units that the keywords
+/// use: 0 to 255 for `rgb`, degrees for hue, 0 to 100 for hsl and hwb
+/// percentages, and the Lab and OKLab ranges for the rest.
+fn channels_of(color: Color, space: Space) -> [f64; 3] {
+    let [r, g, b] = color.components.map(f64::from);
+    match space {
+        Space::Rgb => [r * 255.0, g * 255.0, b * 255.0],
+        Space::Hsl => {
+            let (h, s, l) = rgb_to_hsl(r, g, b);
+            [h, s * 100.0, l * 100.0]
+        }
+        Space::Hwb => {
+            let (h, _, _) = rgb_to_hsl(r, g, b);
+            let white = r.min(g).min(b);
+            let black = 1.0 - r.max(g).max(b);
+            [h, white * 100.0, black * 100.0]
+        }
+        Space::Lab => srgb_to_lab(r, g, b),
+        Space::Lch => {
+            let [l, a, bb] = srgb_to_lab(r, g, b);
+            polar(l, a, bb)
+        }
+        Space::Oklab => srgb_to_oklab(r, g, b),
+        Space::Oklch => {
+            let [l, a, bb] = srgb_to_oklab(r, g, b);
+            polar(l, a, bb)
+        }
+    }
+}
+
+/// Lightness, chroma, and hue in degrees from a Lab-style triple.
+fn polar(l: f64, a: f64, b: f64) -> [f64; 3] {
+    let chroma = a.hypot(b);
+    // Achromatic colors have no meaningful hue; zero keeps the value defined.
+    let hue = if chroma < 1e-9 {
+        0.0
+    } else {
+        b.atan2(a).to_degrees().rem_euclid(360.0)
+    };
+    [l, chroma, hue]
+}
+
+/// Hue in degrees, saturation, and lightness in `[0, 1]`.
+fn rgb_to_hsl(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+    let light = (max + min) / 2.0;
+    if delta == 0.0 {
+        return (0.0, 0.0, light);
+    }
+    let sat = delta / (1.0 - (2.0 * light - 1.0).abs());
+    let hue = if max == r {
+        60.0 * ((g - b) / delta).rem_euclid(6.0)
+    } else if max == g {
+        60.0 * ((b - r) / delta + 2.0)
+    } else {
+        60.0 * ((r - g) / delta + 4.0)
+    };
+    (hue.rem_euclid(360.0), sat, light)
+}
+
+/// The sRGB transfer function inverted: gamma-encoded to linear light.
+fn linearize(c: f64) -> f64 {
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// Inverse of the 3x3 matrix `m`, by cofactors.
+fn invert3(m: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
+    let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+        - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+        + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    let cofactor = |r: usize, col: usize| {
+        let rows: Vec<usize> = (0..3).filter(|&i| i != r).collect();
+        let cols: Vec<usize> = (0..3).filter(|&j| j != col).collect();
+        let minor =
+            m[rows[0]][cols[0]] * m[rows[1]][cols[1]] - m[rows[0]][cols[1]] * m[rows[1]][cols[0]];
+        if (r + col) % 2 == 0 {
+            minor
+        } else {
+            -minor
+        }
+    };
+    let mut out = [[0.0; 3]; 3];
+    for (r, row) in out.iter_mut().enumerate() {
+        for (col, cell) in row.iter_mut().enumerate() {
+            // The inverse is the transpose of the cofactor matrix, over det.
+            *cell = cofactor(col, r) / det;
+        }
+    }
+    out
+}
+
+/// sRGB to CIE Lab (D50). This is the inverse of [`lab_to_srgb`].
+fn srgb_to_lab(r: f64, g: f64, b: f64) -> [f64; 3] {
+    const KAPPA: f64 = 24389.0 / 27.0;
+    const EPSILON: f64 = 216.0 / 24389.0;
+    // The matrix that lab_to_srgb inverts: XYZ (D50) to linear sRGB.
+    const XYZ_TO_RGB: [[f64; 3]; 3] = [
+        [3.1338561, -1.6168667, -0.4906146],
+        [-0.9787684, 1.9161415, 0.0334540],
+        [0.0719453, -0.2289914, 1.4052427],
+    ];
+    let linear = [linearize(r), linearize(g), linearize(b)];
+    let inverse = invert3(XYZ_TO_RGB);
+    let xyz: [f64; 3] = std::array::from_fn(|i| {
+        inverse[i]
+            .iter()
+            .zip(linear)
+            .map(|(m, v)| m * v)
+            .sum::<f64>()
+    });
+    // Reference white D50, scaled out of the XYZ components.
+    let reference = [xyz[0] / 0.96422, xyz[1], xyz[2] / 0.82521];
+    let f = |t: f64| {
+        if t > EPSILON {
+            t.cbrt()
+        } else {
+            (KAPPA * t + 16.0) / 116.0
+        }
+    };
+    let (fx, fy, fz) = (f(reference[0]), f(reference[1]), f(reference[2]));
+    [116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz)]
+}
+
+/// sRGB to OKLab. This is the inverse of [`oklab_to_linear_srgb`].
+fn srgb_to_oklab(r: f64, g: f64, b: f64) -> [f64; 3] {
+    let linear = [linearize(r), linearize(g), linearize(b)];
+    let lms = [
+        0.412_221_470_8 * linear[0] + 0.536_332_536_3 * linear[1] + 0.051_445_992_9 * linear[2],
+        0.211_903_498_2 * linear[0] + 0.680_699_545_1 * linear[1] + 0.107_396_956_6 * linear[2],
+        0.088_302_461_9 * linear[0] + 0.281_718_837_6 * linear[1] + 0.629_978_700_5 * linear[2],
+    ];
+    let cube = lms.map(f64::cbrt);
+    [
+        0.210_454_255_3 * cube[0] + 0.793_617_785_0 * cube[1] - 0.004_072_046_8 * cube[2],
+        1.977_998_495_1 * cube[0] - 2.428_592_205_0 * cube[1] + 0.450_593_709_9 * cube[2],
+        0.025_904_037_1 * cube[0] + 0.782_771_766_2 * cube[1] - 0.808_675_766_0 * cube[2],
+    ]
+}
+
+/// A linear-light sRGB triple to a gamut-clamped [`Color`] with `alpha`.
+fn color_from_linear(linear: [f64; 3], alpha: f32) -> Color {
+    let srgb = linear.map(|c| encode_srgb(c.clamp(0.0, 1.0)).clamp(0.0, 1.0));
+    Color {
+        space: ColorSpace::Srgb,
+        components: [srgb[0] as f32, srgb[1] as f32, srgb[2] as f32],
+        alpha,
+    }
+}
+
+/// Chroma and hue in degrees to the Cartesian `(a, b)` pair.
+fn polar_to_rect(chroma: f64, hue: f64) -> (f64, f64) {
+    let rad = hue.to_radians();
+    (chroma * rad.cos(), chroma * rad.sin())
+}
+
+/// A color from channel values in `space`. This is the inverse of
+/// [`channels_of`], and it clamps each channel to its range.
+fn color_from_channels(space: Space, ch: [f64; 3], alpha: f64) -> Color {
+    let alpha = alpha.clamp(0.0, 1.0) as f32;
+    let srgb = |rgb: [f64; 3]| Color {
+        space: ColorSpace::Srgb,
+        components: rgb.map(|c| c.clamp(0.0, 1.0) as f32),
+        alpha,
+    };
+    match space {
+        Space::Rgb => srgb(ch.map(|c| c / 255.0)),
+        Space::Hsl => srgb(hsl_to_rgb(
+            ch[0].rem_euclid(360.0),
+            (ch[1] / 100.0).clamp(0.0, 1.0),
+            (ch[2] / 100.0).clamp(0.0, 1.0),
+        )),
+        Space::Hwb => {
+            let white = (ch[1] / 100.0).clamp(0.0, 1.0);
+            let black = (ch[2] / 100.0).clamp(0.0, 1.0);
+            if white + black >= 1.0 {
+                let gray = white / (white + black);
+                srgb([gray; 3])
+            } else {
+                let base = hsl_to_rgb(ch[0].rem_euclid(360.0), 1.0, 0.5);
+                srgb(base.map(|c| c * (1.0 - white - black) + white))
+            }
+        }
+        Space::Lab => color_from_linear(lab_to_srgb(ch[0].clamp(0.0, 100.0), ch[1], ch[2]), alpha),
+        Space::Lch => {
+            let (a, b) = polar_to_rect(ch[1].max(0.0), ch[2]);
+            color_from_linear(lab_to_srgb(ch[0].clamp(0.0, 100.0), a, b), alpha)
+        }
+        Space::Oklab => color_from_linear(
+            oklab_to_linear_srgb(ch[0].clamp(0.0, 1.0), ch[1], ch[2]),
+            alpha,
+        ),
+        Space::Oklch => {
+            let (a, b) = polar_to_rect(ch[1].max(0.0), ch[2]);
+            color_from_linear(oklab_to_linear_srgb(ch[0].clamp(0.0, 1.0), a, b), alpha)
+        }
+    }
+}
+
+/// Whether the arguments start with the `from` keyword (relative syntax).
+pub(crate) fn starts_with_from(args: &[ComponentValue]) -> bool {
+    matches!(
+        trim_whitespace(args).first(),
+        Some(ComponentValue::Token(t))
+            if matches!(&t.kind, TokenKind::Ident(s) if s.eq_ignore_ascii_case("from"))
+    )
+}
+
+/// The bindings for a channel expression: the channel keywords and `alpha`.
+struct Bindings {
+    names: [&'static str; 3],
+    values: [f64; 3],
+    alpha: f64,
+}
+
+impl Bindings {
+    fn get(&self, name: &str) -> Option<f64> {
+        if name.eq_ignore_ascii_case("alpha") {
+            return Some(self.alpha);
+        }
+        self.names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case(name))
+            .map(|i| self.values[i])
+    }
+}
+
+/// Evaluates one channel value: a keyword, `none`, a number, a percentage (of
+/// `percent_ref`), a degree value, or a math function over those.
+fn eval_channel(v: &ComponentValue, bind: &Bindings, percent_ref: f64) -> Option<f64> {
+    match v {
+        ComponentValue::Token(t) => match &t.kind {
+            TokenKind::Number { value, .. } => Some(*value),
+            TokenKind::Percentage(p) => Some(p / 100.0 * percent_ref),
+            TokenKind::Dimension { value, unit, .. } if unit.eq_ignore_ascii_case("deg") => {
+                Some(*value)
+            }
+            TokenKind::Ident(name) if name.eq_ignore_ascii_case("none") => Some(0.0),
+            TokenKind::Ident(name) => bind.get(name),
+            _ => None,
+        },
+        ComponentValue::Function(f) => eval_function(&f.name, &f.value, bind, percent_ref),
+        ComponentValue::Block(b) if b.kind == BlockKind::Paren => {
+            evaluate(&b.value, bind, percent_ref)
+        }
+        _ => None,
+    }
+}
+
+/// Evaluates `values` as one expression, with whitespace ignored.
+fn evaluate(values: &[ComponentValue], bind: &Bindings, percent_ref: f64) -> Option<f64> {
+    let items: Vec<&ComponentValue> = values.iter().filter(|v| !v.is_whitespace()).collect();
+    Parser {
+        items,
+        pos: 0,
+        bind,
+        percent_ref,
+    }
+    .finish()
+}
+
+/// `calc()`, `min()`, `max()`, and `clamp()` over channel values.
+fn eval_function(
+    name: &str,
+    args: &[ComponentValue],
+    bind: &Bindings,
+    percent_ref: f64,
+) -> Option<f64> {
+    let parts = || -> Option<Vec<f64>> {
+        crate::parse::split_on(args, |v| v.is_token(&TokenKind::Comma))
+            .into_iter()
+            .map(|part| evaluate(part, bind, percent_ref))
+            .collect()
+    };
+    match name.to_ascii_lowercase().as_str() {
+        "calc" => evaluate(args, bind, percent_ref),
+        "min" => parts()?.into_iter().reduce(f64::min),
+        "max" => parts()?.into_iter().reduce(f64::max),
+        "clamp" => match parts()?.as_slice() {
+            [lo, value, hi] => Some(lo.max(value.min(*hi))),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Recursive-descent evaluator for `+ - * /` over one expression's items.
+struct Parser<'a> {
+    items: Vec<&'a ComponentValue>,
+    pos: usize,
+    bind: &'a Bindings,
+    percent_ref: f64,
+}
+
+impl Parser<'_> {
+    fn peek_delim(&self) -> Option<char> {
+        match self.items.get(self.pos) {
+            Some(ComponentValue::Token(t)) => match t.kind {
+                TokenKind::Delim(c) => Some(c),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Parses all items as one expression, failing on trailing input.
+    fn finish(mut self) -> Option<f64> {
+        let value = self.sum()?;
+        (self.pos == self.items.len()).then_some(value)
+    }
+
+    fn sum(&mut self) -> Option<f64> {
+        let mut acc = self.product()?;
+        while let Some(op) = self.peek_delim().filter(|c| *c == '+' || *c == '-') {
+            self.pos += 1;
+            let rhs = self.product()?;
+            acc = if op == '+' { acc + rhs } else { acc - rhs };
+        }
+        Some(acc)
+    }
+
+    fn product(&mut self) -> Option<f64> {
+        let mut acc = self.unary()?;
+        while let Some(op) = self.peek_delim().filter(|c| *c == '*' || *c == '/') {
+            self.pos += 1;
+            let rhs = self.unary()?;
+            acc = if op == '*' {
+                acc * rhs
+            } else if rhs == 0.0 {
+                return None;
+            } else {
+                acc / rhs
+            };
+        }
+        Some(acc)
+    }
+
+    fn unary(&mut self) -> Option<f64> {
+        match self.peek_delim() {
+            Some('-') => {
+                self.pos += 1;
+                self.primary().map(|v| -v)
+            }
+            Some('+') => {
+                self.pos += 1;
+                self.primary()
+            }
+            _ => self.primary(),
+        }
+    }
+
+    fn primary(&mut self) -> Option<f64> {
+        let item = *self.items.get(self.pos)?;
+        self.pos += 1;
+        eval_channel(item, self.bind, self.percent_ref)
+    }
+}
+
+/// `rgb(from <color> r g b [/ alpha])` and the same form for the other spaces.
+/// The origin color supplies the channel values that the keywords stand for.
+/// The alpha defaults to the origin's alpha (CSS Color 5).
+fn parse_relative(name: &str, args: &[ComponentValue]) -> Option<Color> {
+    let space = Space::of(name)?;
+    let items: Vec<&ComponentValue> = trim_whitespace(args)
+        .iter()
+        .filter(|v| !v.is_whitespace())
+        .collect();
+    // items[0] is the `from` keyword and items[1] is the origin color.
+    let origin = parse_color(std::slice::from_ref(*items.get(1)?))?;
+    let rest = &items[2..];
+    let (channel_items, alpha_item) = match rest {
+        [a, b, c] => (vec![*a, *b, *c], None),
+        [a, b, c, slash, alpha] if slash.is_token(&TokenKind::Delim('/')) => {
+            (vec![*a, *b, *c], Some(*alpha))
+        }
+        _ => return None,
+    };
+
+    let bind = Bindings {
+        names: space.keywords(),
+        values: channels_of(origin, space),
+        alpha: f64::from(origin.alpha),
+    };
+    let refs = space.percent_refs();
+    let mut values = [0.0; 3];
+    for (i, item) in channel_items.iter().enumerate() {
+        values[i] = eval_channel(item, &bind, refs[i])?;
+    }
+    let alpha = match alpha_item {
+        Some(item) => eval_channel(item, &bind, 1.0)?,
+        None => f64::from(origin.alpha),
+    };
+    Some(color_from_channels(space, values, alpha))
 }

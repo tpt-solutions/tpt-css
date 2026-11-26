@@ -162,7 +162,7 @@ it for M1.
    the parent's subtree is also restyled, which covers every sibling. Stylesheet
    and tree changes restyle everything. A precise dependency index is M3 work.
 9. **`restyle` returns a copy of the cached map.** This keeps the API of spec 8.2
-   at the cost of one clone per call. A shared map is M3 work.
+   at the cost of one clone per call. A shared map is M3 work. (Superseded by decision 16 in section 8.)
 10. **`StyleTree::text` has a default.** Adapters that do not supply text get the
     empty string, so `:empty` treats them as empty.
 
@@ -318,20 +318,22 @@ These numbers come from the ignored tests in `tests/integration/perf.rs`, run wi
 `cargo test --release --test integration -- --ignored --nocapture`. They are
 engineering measurements, not claims about other machines (spec 21.1).
 
-- Tokenizer: about 9.8 million tokens per second.
-- Static tree of 10,000 elements: full resolve about 44 ms. A local restyle that
+- Tokenizer: about 10.4 million tokens per second.
+- Static tree of 10,000 elements: full resolve about 45 ms. A local restyle that
   changes one element with a subject-only rule restyles 1 element and takes about
-  16 ms. It was 32 ms before the restyle copied the cached map once instead of
-  twice. The copy still dominates; returning a shared map is the next fix, and it
-  is an API change (open item).
+  34 µs, since `restyle` returns a reference into the cache (decision 16). It was
+  16 ms when the map was copied, and 32 ms when it was copied twice.
 
 ### Later additions (this batch)
 
-12. **Scope proximity ranks after inline and before specificity**, following the
-    key in `spec.txt` 13.3. A scoped rule's proximity is the number of ancestor
-    steps from the element up to its scope root. An unscoped rule has infinite
-    proximity, so a scoped rule beats a more specific unscoped rule. This is our
-    reading of Cascade 6; it needs review against the spec text.
+12. **Scope proximity ranks after specificity**, following the sorting order of the
+    current Cascade 6 draft: origin and importance, context, style attribute,
+    layers, specificity, scope proximity, then order of appearance. A scoped
+    rule's proximity is the number of ancestor steps from the element up to its
+    scope root. An unscoped rule has infinite proximity, so among equally specific
+    rules a scoped one wins whatever the source order. `spec.txt` 13.3 lists the
+    proximity field before specificity. That disagrees with the draft, and
+    `spec.txt` needs correcting. The code follows the draft.
 13. **Calc nesting is checked against `max_calc_depth`** where declarations enter
     the engine: at stylesheet parse (both top-level and nested rules) and after
     `var()` substitution at computed time. The value parser's own bound stays at
@@ -345,17 +347,37 @@ engineering measurements, not claims about other machines (spec 21.1).
     at 1 dppx with no contrast preference. `MediaEnvironment` is no longer `Eq`,
     because the pixel ratio is a float.
 
+16. **`restyle` returns a reference into the cache.** Nothing is copied on a
+    restyle. `resolve` still returns an owned map. A one-element local restyle on
+    10,000 elements takes about 34 µs in release, down from about 16 ms when the
+    map was copied.
+17. **Relative color syntax (CSS Color 5)** works for `rgb`, `hsl`, `hwb`, `lab`,
+    `lch`, `oklab`, and `oklch`. The origin color supplies the channel values in
+    its own space, and the keywords bind to them. Each channel is one component
+    value: a keyword, `none`, a number, a percentage, or a `calc()`, `min()`,
+    `max()`, or `clamp()` over those. The alpha defaults to the origin's alpha.
+    The forward conversions from sRGB are the inverses of the existing ones, and
+    the tests check that each color round-trips through each space.
+18. **Attribute-named invalidation.** `StyleChange::AttributeNamed(node, name)`
+    restyles only when a selector can read the attribute: `#id` and `.class`, an
+    attribute selector, or one of those inside `:not()`, `:is()`, `:where()`,
+    `:has()`, and `@scope` roots and limits. `style`, `lang`, and `dir` are always
+    relevant, since style reads them directly. The name set is computed on demand
+    and reset when sheets change. `StyleChange` is no longer `Copy`, because the
+    name is owned.
+
 ### Still open
 
 - Scope proximity is implemented (decision 12). The ordering for unscoped rules needs review against the spec text.
-- Relative color syntax, `rgb(from ...)`, and color interpolation in spaces other
+- Relative color syntax for `color()`, and color interpolation in spaces other
   than sRGB.
+- `StyleChange::AttributeChanged` (no name) is still conservative. Use
+  `AttributeNamed` to skip attributes that no selector reads.
 - Container units across nested containers: only the nearest size container is used.
 - Shadow DOM: `::part()`, `::slotted()`, `::highlight()`, `:host`, `:host-context()`.
 - Style sharing, a dependency graph for custom properties, and a dependency index
   for selectors (the cutoff and the conservative rules are the current approach).
-- `StyleChange::AttributeChanged` carries no attribute name, so the restyle cannot
-  yet use the name to skip rules.
+  `AttributeNamed` to skip attributes that no selector reads.
 - Fuzz targets and coverage-guided fuzzing. The randomized tests are seeded and
   deterministic, which is not the same thing.
 - The WPT subsuites, which need a separate checkout (spec 22.2).
