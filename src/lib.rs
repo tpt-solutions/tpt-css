@@ -29,6 +29,7 @@ pub mod tree;
 pub mod values;
 
 pub use cascade::origin::Origin;
+pub use env::container::{ContainerInfo, ContainerSizeProvider};
 pub use env::{Environment, MediaEnvironment, MediaKind, ViewportInfo};
 pub use limits::ParseLimits;
 pub use parse::{
@@ -37,6 +38,7 @@ pub use parse::{
 };
 pub use style::computed::{ComputedStyle, StyleMap};
 pub use style::custom::CustomPropertyValue;
+pub use style::custom::RegisteredProperty;
 pub use style::invalidation::StyleChange;
-pub use style::resolver::{ResolverConfig, SheetId, StyleResolver};
+pub use style::resolver::{ResolverConfig, SheetId, StyleResolver, VisitedPolicy};
 pub use tree::contract::StyleTree;

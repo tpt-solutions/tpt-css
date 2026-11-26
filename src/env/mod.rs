@@ -8,6 +8,7 @@
 //! providers (M2), font metrics, URL resolution, and `env()` variables are
 //! later additions with the same shape.
 
+pub mod container;
 pub mod media;
 
 use crate::ast::PointerKind;

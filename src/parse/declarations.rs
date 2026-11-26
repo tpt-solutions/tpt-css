@@ -89,7 +89,7 @@ pub(crate) fn parse_block_contents(
     out
 }
 
-fn parse_declaration(values: &[ComponentValue]) -> Result<Declaration, Diagnostic> {
+pub(crate) fn parse_declaration(values: &[ComponentValue]) -> Result<Declaration, Diagnostic> {
     let span = span_of(values);
     let name = match values.first() {
         Some(ComponentValue::Token(t)) => match &t.kind {

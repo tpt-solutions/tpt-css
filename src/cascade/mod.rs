@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Copyright (c) 2026 TPT Solutions
 
-//! Cascade (spec 13): origin, importance, inline style, specificity, and
-//! source order.
+//! Cascade (spec 13): origin, importance, layers, inline style, specificity,
+//! and source order.
 //!
-//! Layers (M2), scope proximity (M2), and animation interpolation are not
-//! implemented. The key below has the same shape as spec 13.3 so those can be
-//! added without changing the comparison of the existing fields.
+//! Scope proximity (Cascade 6, `@scope`) is not implemented yet. The key has
+//! the same shape as spec 13.3, so it can be added between the layer and
+//! specificity fields.
 
 pub mod order;
 pub mod origin;
@@ -16,19 +16,46 @@ use order::DeclarationOrder;
 use origin::Origin;
 use std::cmp::Ordering;
 
+/// Layer rank for a declaration that is not in any layer (spec 13.4).
+///
+/// Unlayered normal declarations beat every layered normal declaration. For
+/// important declarations the order reverses, and unlayered important
+/// declarations lose to every layered important declaration.
+pub const UNLAYERED_NORMAL: u32 = u32::MAX;
+/// Layer rank for an unlayered important declaration.
+pub const UNLAYERED_IMPORTANT: u32 = 0;
+
+/// Layer rank for a declaration in layer `index` (0 is the first layer
+/// declared), given its importance.
+///
+/// Normal: later layers rank higher, so they win (spec 13.4). Important:
+/// earlier layers rank higher, so they win.
+pub fn layer_rank(index: usize, important: bool) -> u32 {
+    let index = index as u32;
+    if important {
+        // Leave room below for UNLAYERED_IMPORTANT and above the earliest layer.
+        u32::MAX - 1 - index
+    } else {
+        index + 1
+    }
+}
+
 /// Everything needed to decide which of two competing declarations wins.
 ///
-/// Comparison (spec 13.3, Cascade 5):
+/// Comparison (spec 13.3, Cascade 5 with layers from 13.4):
 /// 1. origin and importance (`Origin::precedence`), higher wins
-/// 2. inline style over non-inline at the same origin and importance (spec 13.5)
-/// 3. specificity, higher wins
-/// 4. declaration order, later wins
+/// 2. layer rank (`layer_rank`), higher wins
+/// 3. inline style over non-inline at the same origin and importance (spec 13.5)
+/// 4. specificity, higher wins
+/// 5. declaration order, later wins
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CascadeKey {
     /// Origin of the declaration.
     pub origin: Origin,
     /// Whether the declaration is `!important`.
     pub important: bool,
+    /// Layer rank. See [`layer_rank`] and [`UNLAYERED_NORMAL`].
+    pub layer: u32,
     /// Whether it came from a `style` attribute.
     pub inline: bool,
     /// Specificity of the matching selector. Inline styles use zero.
@@ -48,6 +75,7 @@ impl Ord for CascadeKey {
     fn cmp(&self, other: &Self) -> Ordering {
         self.rank()
             .cmp(&other.rank())
+            .then(self.layer.cmp(&other.layer))
             .then(self.inline.cmp(&other.inline))
             .then(self.specificity.cmp(&other.specificity))
             .then(self.order.cmp(&other.order))

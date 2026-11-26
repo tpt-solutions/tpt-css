@@ -84,6 +84,9 @@ pub enum SimpleSelector {
     Lang(String),
     /// `:dir(ltr | rtl)`
     Dir(Direction),
+    /// `&`, the parent selector in a nested rule. Replaced by the parent list
+    /// when the nested rule is built, so it never reaches the matcher.
+    Nesting,
 }
 
 /// The `An+B` family of structural selectors.
@@ -165,4 +168,40 @@ pub enum PseudoClass {
     ReadWrite,
     /// `:placeholder-shown`
     PlaceholderShown,
+    /// `:link`
+    Link,
+    /// `:any-link`
+    AnyLink,
+    /// `:visited`. Subject to the visited-link policy (spec 20.2).
+    Visited,
+    /// `:focus-visible`
+    FocusVisible,
+    /// `:focus-within`
+    FocusWithin,
+    /// `:target`
+    Target,
+    /// `:valid`
+    Valid,
+    /// `:invalid`
+    Invalid,
+    /// `:user-valid`
+    UserValid,
+    /// `:user-invalid`
+    UserInvalid,
+    /// `:in-range`
+    InRange,
+    /// `:out-of-range`
+    OutOfRange,
+    /// `:default`
+    Default,
+    /// `:indeterminate`
+    Indeterminate,
+    /// `:open`
+    Open,
+    /// `:closed`
+    Closed,
+    /// `:modal`
+    Modal,
+    /// `:popover-open`
+    PopoverOpen,
 }

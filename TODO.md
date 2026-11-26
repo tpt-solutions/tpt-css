@@ -144,26 +144,26 @@ All decisions are recorded in DESIGN.md section 2.
 
 ## 4. M2: modern cascade (spec 24)
 
-- [ ] `@layer` with first-declaration order and layer cascade rules (spec 13.4)
-- [ ] `@supports` using engine's own capabilities, `selector()`, `not` (spec 16.4)
-- [ ] `@scope`, `:scope`, Cascade 6 scope proximity (spec 13.3)
-- [ ] CSS nesting and `&` (spec 12.3)
-- [ ] `@container` foundation and `ContainerSizeProvider` (spec 16.5)
-- [ ] `@property` and registered custom properties (spec 13.7)
-- [ ] `revert` and `revert-layer` (spec 13.8)
-- [ ] `all` shorthand (spec 13.8)
-- [ ] Animation and transition cascade origins (spec 13.2)
-- [ ] Keyframe style resolution (`@keyframes`)
-- [ ] `@font-face` parsing
-- [ ] Modern color functions: `color()`, relative color syntax, `light-dark()`
-- [ ] Viewport and container units (spec 14.3)
-- [ ] `:has()`, `:host`, `:host-context()`, `::slotted()`, `::part()`, `:state()` (spec 12.2 Tier 2)
-- [ ] Modern state selectors: `:focus-visible`, `:focus-within`, `:target`, `:any-link`, `:link`, `:visited`, form validity states, `:open`, `:closed`, `:modal`, `:popover-open`
-- [ ] Modern pseudo-elements: `::selection`, `::backdrop`, `::file-selector-button`
-- [ ] Layer and scope behavior tests (spec 22.1)
-- [ ] Registered custom property tests
-- [ ] Container query integration test with size provider
-- [ ] Animation declarations participate in cascade test
+- [x] `@layer` with first-declaration order and layer cascade rules (spec 13.4). Statement and block forms, anonymous layers, dotted nested names. Tests: `tests/cascade/layers.rs`.
+- [x] `@supports` using engine's own capabilities, `selector()`, `not`, `and`, `or` (spec 16.4). Evaluated at parse time against the real registry and selector parser. `font-tech()` and `font-format()` report false.
+- [ ] `@scope`, `:scope`, Cascade 6 scope proximity (spec 13.3). Not started.
+- [x] CSS nesting and `&` (spec 12.3). Nested style rules and nested `@media`. `&` is replaced by `:is(parent)`; a selector without `&` gets a descendant prefix.
+- [x] `@container` foundation and `ContainerSizeProvider` (spec 16.5). The host supplies sizes; named and unnamed queries; size features only. Container units are not done (see below).
+- [x] `@property` and registered custom properties (spec 13.7). `inherits`, `initial-value`, and `syntax` checks for `*`, `<length>`, `<number>`, `<integer>`, `<percentage>`, `<length-percentage>`, `<color>`.
+- [x] `revert` and `revert-layer` (spec 13.8). `revert` rolls back to lower origins; `revert-layer` to lower layers of the same origin.
+- [x] `all` shorthand (spec 13.8). Resets every property except `direction` and `unicode-bidi`; CSS-wide keywords only.
+- [x] Animation and transition cascade origins (spec 13.2). The origins take part in the cascade. No animation driver exists (spec 3).
+- [~] Keyframe style resolution (`@keyframes`). Parsed and stored (`resolver.keyframes(name)`). Interpolation is not implemented.
+- [x] `@font-face` parsing. Parsed and stored (`resolver.font_faces()`). Loading is the host's job (spec 3).
+- [~] Modern color functions: `color()`, relative color syntax, `light-dark()`. `light-dark()` is done. The rest is not started.
+- [~] Viewport and container units (spec 14.3). Viewport units were done in M1. Container units (`cqw` and the rest) are not done.
+- [~] `:has()`, `:host`, `:host-context()`, `::slotted()`, `::part()`, `:state()` (spec 12.2 Tier 2). Not started; `:has()` is M2 work, the shadow selectors are M4.
+- [x] Modern state selectors: `:focus-visible`, `:focus-within`, `:target`, `:any-link`, `:link`, `:visited`, form validity states, `:open`, `:closed`, `:modal`, `:popover-open`, `:default`, `:indeterminate`. `:visited` follows the policy in spec 20.2.
+- [x] Modern pseudo-elements: `::selection`, `::backdrop`, `::file-selector-button`. Generated without `content`.
+- [~] Layer and scope behavior tests (spec 22.1). Layer tests are done; scope tests wait for `@scope`.
+- [x] Registered custom property tests (`tests/style/m2.rs`).
+- [x] Container query integration test with size provider (`tests/integration/container.rs`).
+- [x] Animation declarations participate in cascade test (`tests/style/m2.rs`).
 
 ## 5. M3: incremental style + CSSOM (spec 24)
 

@@ -31,6 +31,11 @@ pub fn serialize_value(value: &Value) -> String {
             })
             .collect::<Vec<_>>()
             .join(", "),
+        Value::LightDark(light, dark) => format!(
+            "light-dark({}, {})",
+            serialize_color(light),
+            serialize_color(dark)
+        ),
         Value::Strings(list) => list
             .iter()
             .map(|s| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")))

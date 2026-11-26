@@ -108,6 +108,22 @@ Design decisions and deviations are in [DESIGN.md](DESIGN.md).
 | --- | --- |
 | M0 | Done, with the partial items above. Merged to `master`. |
 | M1 | Largely done on branch `m1-practical-css`. Open items are in TODO.md section 3 (shorthands `font`, `list-style`, `text-decoration`; full named colors; modern color spaces; invalidation index; an AppFront document fixture). |
-| M2 | Not started. |
+| M2 | Largely done on branch `m2-modern-cascade`. Open items are in TODO.md section 4 (`@scope` and scope proximity, `:has()`, `color()`, container units, keyframe interpolation). |
 | M3 | Not started. |
 | M4 | Not started. |
+
+## M2 additions
+
+| Spec | Algorithm | Module | Tests | Status | Known gaps |
+| --- | --- | --- | --- | --- | --- |
+| 13.4 | cascade layers, layer ranks | `cascade/mod.rs` `layer_rank`, `style/resolver.rs` `flatten` | `tests/cascade/layers.rs` | done | Layer order is the order of first declaration. |
+| 13.8 | `revert`, `revert-layer` | `style/resolver.rs` `resolve_winner` | `tests/cascade/layers.rs` | done | `revert` in custom properties is unset. |
+| 13.8 | `all` | `style/resolver.rs` `compile_declaration` | `tests/style/m2.rs` | done | |
+| 16.4 | `@supports` | `parse/supports.rs` | `tests/style/m2.rs`, `tests/parse/m2.rs` | done | `font-tech()`, `font-format()` report false. |
+| 12.3 | CSS nesting, `&` | `parse/selectors.rs` `resolve_nesting`, `parse/rules.rs` | `tests/style/m2.rs`, `tests/parse/m2.rs` | done | Nested rules are resolved at parse time. |
+| 16.5 | `@container`, `ContainerSizeProvider` | `env/container.rs`, `style/resolver.rs` `containers_match` | `tests/integration/container.rs` | done | Container units are not done. |
+| 15.1 | `@property` | `style/custom.rs` `syntax_matches`, `resolve_customs` | `tests/style/m2.rs` | done | Only the listed syntaxes are checked. |
+| 13.2 (animation origin) | `Origin::Animation` in the cascade | `cascade/origin.rs` | `tests/style/m2.rs` | partial | No animation driver; keyframes are stored, not interpolated. |
+| 14.5 | `light-dark()` | `properties/parse.rs`, `style/computed.rs` | `tests/style/m2.rs` | done | `color()` and relative color syntax are not done. |
+| 12.2 Tier 2 | state selectors | `selectors/matching.rs` | `tests/style/m2.rs` | done | `:has()`, `:scope`, `:host`, and the shadow selectors are not done. |
+| 20.2 | visited policy | `style/resolver.rs` `VisitedPolicy` | `tests/style/m2.rs` | done | |

@@ -18,7 +18,7 @@ fn style_rules(css: &str) -> Vec<tpt_css::ast::StyleRule> {
         .into_iter()
         .filter_map(|r| match r {
             Rule::Style(s) => Some(s),
-            Rule::Unknown(_) | Rule::Media(_) => None,
+            _ => None,
         })
         .collect()
 }
@@ -216,3 +216,5 @@ fn deep_nesting_drops_the_sheet_with_a_diagnostic() {
         .iter()
         .any(|d| d.code == DiagnosticCode::LimitExceeded));
 }
+
+mod m2;

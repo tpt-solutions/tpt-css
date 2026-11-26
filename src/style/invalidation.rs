@@ -69,7 +69,7 @@ impl StyleResolver {
     /// reused from the previous result.
     pub fn restyle<T: StyleTree>(&mut self, tree: &T, env: &Environment) -> StyleMap {
         let reusable = match &self.cache {
-            Some(cache) => cache.env == *env && !self.full_dirty,
+            Some(cache) => cache.env == *env && !self.full_dirty && self.containers.is_none(),
             None => false,
         };
         if !reusable {

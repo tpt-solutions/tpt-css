@@ -119,7 +119,7 @@ fn parse_one(values: &[ComponentValue]) -> Result<MediaQuery, Diagnostic> {
 
 /// Parses `(name)` or `(name: value)`. Anything unrecognized becomes
 /// `MediaFeature::Unknown`.
-fn parse_feature(values: &[ComponentValue]) -> MediaFeature {
+pub(crate) fn parse_feature(values: &[ComponentValue]) -> MediaFeature {
     let v = trim_whitespace(values);
     let name = match v.first() {
         Some(ComponentValue::Token(t)) => match &t.kind {
@@ -239,4 +239,70 @@ fn ratio_value(values: &[ComponentValue]) -> Option<f64> {
         }
         _ => None,
     }
+}
+
+/// Parses the prelude of `@container`: an optional container name, then one or
+/// more size features joined with `and` (spec 16.5). The name is any identifier
+/// that is followed by a feature block.
+pub(crate) fn parse_container_prelude(
+    values: &[ComponentValue],
+) -> Result<(Option<String>, Vec<MediaFeature>), Diagnostic> {
+    let values = trim_whitespace(values);
+    let mut i = 0;
+    let mut name = None;
+    if let Some(ComponentValue::Token(t)) = values.first() {
+        if let TokenKind::Ident(s) = &t.kind {
+            let next = values[1..].iter().find(|v| !v.is_whitespace());
+            if !s.eq_ignore_ascii_case("not") && matches!(next, Some(ComponentValue::Block(_))) {
+                name = Some(s.clone());
+                i = 1;
+            }
+        }
+    }
+    let mut features = Vec::new();
+    loop {
+        while i < values.len() && values[i].is_whitespace() {
+            i += 1;
+        }
+        if i >= values.len() {
+            break;
+        }
+        if !features.is_empty() {
+            if !ident_is(values.get(i), "and") {
+                return Err(Diagnostic::error(
+                    DiagnosticCode::InvalidSelector,
+                    span_of(&values[i..]),
+                    "expected 'and' between container features",
+                    Some(MEDIA_URL),
+                ));
+            }
+            i += 1;
+            while i < values.len() && values[i].is_whitespace() {
+                i += 1;
+            }
+        }
+        match values.get(i) {
+            Some(ComponentValue::Block(b)) if b.kind == BlockKind::Paren => {
+                features.push(parse_feature(&b.value));
+                i += 1;
+            }
+            _ => {
+                return Err(Diagnostic::error(
+                    DiagnosticCode::InvalidSelector,
+                    span_of(&values[i..]),
+                    "malformed container query",
+                    Some(MEDIA_URL),
+                ))
+            }
+        }
+    }
+    if features.is_empty() {
+        return Err(Diagnostic::error(
+            DiagnosticCode::InvalidSelector,
+            span_of(values),
+            "a container query needs at least one feature",
+            Some(MEDIA_URL),
+        ));
+    }
+    Ok((name, features))
 }

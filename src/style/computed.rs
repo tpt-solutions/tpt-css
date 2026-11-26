@@ -110,6 +110,8 @@ pub(crate) struct ComputeContext {
     pub viewport_width: f64,
     /// Viewport height in px, for `vh`, `vmin`, and `vmax`.
     pub viewport_height: f64,
+    /// Whether the color scheme is dark, for `light-dark()`.
+    pub dark: bool,
 }
 
 impl ComputeContext {
@@ -172,6 +174,7 @@ pub(crate) fn compute_value(
         Value::Percentage(p) if is_font_size => {
             Value::px(clamp_px(ctx.parent_font_size * p / 100.0))
         }
+        Value::LightDark(light, dark) => Value::Color(if ctx.dark { dark } else { light }),
         Value::Calc(node) => compute_calc(&node, ctx, is_font_size, non_negative(grammar)),
         Value::Keyword("currentcolor") if matches!(grammar, Grammar::Color) => {
             let c = if id == ids::COLOR {

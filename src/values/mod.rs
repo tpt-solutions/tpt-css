@@ -76,6 +76,9 @@ pub enum Value {
     FontFamily(Vec<String>),
     /// The string list of `content`.
     Strings(Vec<String>),
+    /// A `light-dark(light, dark)` color pair, resolved at computed-value time
+    /// from the color scheme (CSS Color 5).
+    LightDark(Color, Color),
     /// A `calc()`, `min()`, `max()`, or `clamp()` expression. Specified values
     /// keep their units; computed values have lengths in px.
     Calc(Box<CalcNode>),

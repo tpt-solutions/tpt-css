@@ -14,8 +14,7 @@ use crate::values::color::parse_color;
 use crate::values::length::parse_length_percentage;
 use crate::values::Value;
 
-/// CSS-wide keywords supported in M1 (spec 13.8). `revert` and `revert-layer`
-/// need origin and layer tracking (M2) and are rejected for now.
+/// CSS-wide keywords (spec 13.8).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CssWide {
     /// `initial`
@@ -24,6 +23,10 @@ pub enum CssWide {
     Inherit,
     /// `unset`
     Unset,
+    /// `revert`: roll back to the cascaded value from the origin below (spec 13.8).
+    Revert,
+    /// `revert-layer`: roll back to the value from the layer below (spec 13.8).
+    RevertLayer,
 }
 
 /// The value does not match the property grammar.
@@ -71,9 +74,9 @@ pub fn parse_property_value(
 
     let value = match spec.grammar {
         Grammar::Keywords(list) => keyword(values, list),
-        Grammar::Color => {
-            keyword(values, &["currentcolor"]).or_else(|| parse_color(values).map(Value::Color))
-        }
+        Grammar::Color => keyword(values, &["currentcolor"])
+            .or_else(|| parse_light_dark(values))
+            .or_else(|| parse_color(values).map(Value::Color)),
         Grammar::LengthPercentage {
             non_negative,
             keywords,
@@ -106,6 +109,8 @@ fn css_wide(name: &str) -> Option<CssWide> {
         "initial" => Some(CssWide::Initial),
         "inherit" => Some(CssWide::Inherit),
         "unset" => Some(CssWide::Unset),
+        "revert" => Some(CssWide::Revert),
+        "revert-layer" => Some(CssWide::RevertLayer),
         _ => None,
     }
 }
@@ -207,4 +212,22 @@ fn parse_strings(values: &[ComponentValue]) -> Option<Value> {
         }
     }
     (!out.is_empty()).then_some(Value::Strings(out))
+}
+
+/// `light-dark(light, dark)`: each argument is a color. The choice is made at
+/// computed-value time from the color scheme (CSS Color 5).
+fn parse_light_dark(values: &[ComponentValue]) -> Option<Value> {
+    let [ComponentValue::Function(f)] = values else {
+        return None;
+    };
+    if !f.name.eq_ignore_ascii_case("light-dark") {
+        return None;
+    }
+    let parts = crate::parse::split_on(&f.value, |v| v.is_token(&TokenKind::Comma));
+    let [light, dark] = parts.as_slice() else {
+        return None;
+    };
+    let light = parse_color(trim_whitespace(light))?;
+    let dark = parse_color(trim_whitespace(dark))?;
+    Some(Value::LightDark(light, dark))
 }

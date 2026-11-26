@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Copyright (c) 2026 TPT Solutions
 
-//! Custom properties and `var()` substitution (spec 13.7, 14.6).
+//! Custom properties and `var()` substitution (spec 13.7, 14.6), and registered
+//! custom properties from `@property` (CSS Properties and Values).
 //!
-//! Custom properties are inherited and cascade like other properties. Their
-//! values stay as tokens until computed-value time. At that point each custom
-//! property is resolved with `var()` substitution, which uses fallbacks when a
-//! variable is missing or invalid (spec 13.7 steps 1 to 6).
+//! Custom properties cascade like other properties. Their values stay as tokens
+//! until computed-value time, when each one is resolved with `var()`
+//! substitution. A registered property also has an `inherits` flag, an
+//! optional initial value, and a `syntax` that its computed value must match.
 //!
 //! Cycles are detected with a stack of names being resolved. A property that
 //! depends on itself is invalid at computed-value time, and so is every
@@ -17,6 +18,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::properties::{CssWide, SpecifiedValue};
 use crate::syntax::{ComponentValue, Function, SimpleBlock, TokenKind};
+use crate::values::color::parse_color;
+use crate::values::length::parse_length_percentage;
+use crate::values::Value;
 
 /// A resolved custom property: its tokens after `var()` substitution.
 #[derive(Debug, Clone, PartialEq)]
@@ -30,6 +34,17 @@ impl CustomPropertyValue {
     pub fn text(&self) -> String {
         components_text(&self.tokens)
     }
+}
+
+/// A `@property` registration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RegisteredProperty {
+    /// The `syntax` descriptor, or `None` for `*` (any value).
+    pub syntax: Option<String>,
+    /// Whether the property inherits.
+    pub inherits: bool,
+    /// The initial value tokens, if declared.
+    pub initial: Option<Vec<ComponentValue>>,
 }
 
 /// A `var()` substitution failed: the variable is missing or invalid and has no
@@ -55,11 +70,11 @@ impl VarResolver for MapResolver<'_> {
     }
 }
 
-/// Resolves the custom properties of one element from its cascaded declarations
-/// and its parent's resolved properties.
+/// Resolves the custom properties of one element.
 struct CustomResolver<'a> {
     declared: &'a BTreeMap<String, SpecifiedValue>,
     parent: Option<&'a BTreeMap<String, CustomPropertyValue>>,
+    registered: &'a BTreeMap<String, RegisteredProperty>,
     memo: BTreeMap<String, Option<Vec<ComponentValue>>>,
     stack: Vec<String>,
     max_depth: usize,
@@ -70,6 +85,20 @@ impl CustomResolver<'_> {
         self.parent
             .and_then(|p| p.get(name))
             .map(|v| v.tokens.clone())
+    }
+
+    /// The registered initial value of `name`, if it has one.
+    fn initial(&self, name: &str) -> Option<Vec<ComponentValue>> {
+        self.registered.get(name).and_then(|r| r.initial.clone())
+    }
+
+    /// The value `name` takes when it is not inherited: the registered initial
+    /// value, or invalid for an unregistered property.
+    fn not_inherited(&self, name: &str) -> Option<Vec<ComponentValue>> {
+        match self.registered.get(name) {
+            Some(r) if !r.inherits => self.initial(name),
+            _ => self.inherited(name),
+        }
     }
 
     /// The computed tokens of `name`, or `None` if it is invalid or undefined.
@@ -83,15 +112,27 @@ impl CustomResolver<'_> {
         }
         self.stack.push(name.to_string());
         let declared = self.declared;
-        let result = match declared.get(name) {
-            None => self.inherited(name),
-            Some(SpecifiedValue::CssWide(CssWide::Initial)) => None,
-            Some(SpecifiedValue::CssWide(_)) => self.inherited(name),
+        let raw = match declared.get(name) {
+            None => self.not_inherited(name),
+            Some(SpecifiedValue::CssWide(CssWide::Initial)) => self.initial(name),
+            Some(SpecifiedValue::CssWide(CssWide::Inherit)) => self.inherited(name),
+            Some(SpecifiedValue::CssWide(_)) => self.not_inherited(name),
             Some(SpecifiedValue::Unparsed { tokens, .. }) => {
                 let max = self.max_depth;
                 substitute(tokens, self, depth, max).ok()
             }
             Some(SpecifiedValue::Value(_)) => None,
+        };
+        let result = match (raw, self.registered.get(name)) {
+            // A registered value must match its syntax, or the initial value is used.
+            (Some(tokens), Some(reg)) => {
+                if syntax_matches(reg.syntax.as_deref(), &tokens) {
+                    Some(tokens)
+                } else {
+                    self.initial(name)
+                }
+            }
+            (other, _) => other,
         };
         self.stack.pop();
         self.memo.insert(name.to_string(), result.clone());
@@ -107,21 +148,24 @@ impl VarResolver for CustomResolver<'_> {
 
 /// Resolves all custom properties for an element.
 ///
-/// `declared` holds the cascaded custom properties. `parent` holds the parent's
-/// resolved ones, which are inherited. Properties that are invalid or undefined
-/// are absent from the result.
+/// `declared` holds the cascaded custom properties, and `parent` holds the
+/// parent's resolved ones. `registered` holds the `@property` registrations.
+/// Properties that are invalid or undefined are absent from the result.
 pub fn resolve_customs(
     declared: &BTreeMap<String, SpecifiedValue>,
     parent: Option<&BTreeMap<String, CustomPropertyValue>>,
+    registered: &BTreeMap<String, RegisteredProperty>,
     max_depth: usize,
 ) -> BTreeMap<String, CustomPropertyValue> {
     let mut names: BTreeSet<String> = declared.keys().cloned().collect();
     if let Some(p) = parent {
         names.extend(p.keys().cloned());
     }
+    names.extend(registered.keys().cloned());
     let mut resolver = CustomResolver {
         declared,
         parent,
+        registered,
         memo: BTreeMap::new(),
         stack: Vec::new(),
         max_depth,
@@ -133,6 +177,40 @@ pub fn resolve_customs(
         }
     }
     out
+}
+
+/// Whether `tokens` match a registered `syntax`. `None` means `*`, which matches
+/// anything. Unknown syntaxes are accepted rather than rejected, since the
+/// registry cannot check them yet.
+pub fn syntax_matches(syntax: Option<&str>, tokens: &[ComponentValue]) -> bool {
+    let Some(syntax) = syntax else {
+        return true;
+    };
+    let single = crate::syntax::trim_whitespace(tokens);
+    match syntax.trim() {
+        "<length>" => matches!(
+            parse_length_percentage(single, false, true),
+            Some(Value::Length { .. })
+        ),
+        "<percentage>" => matches!(
+            single,
+            [ComponentValue::Token(t)] if matches!(t.kind, TokenKind::Percentage(_))
+        ),
+        "<number>" => matches!(
+            single,
+            [ComponentValue::Token(t)] if matches!(t.kind, TokenKind::Number { .. })
+        ),
+        "<integer>" => matches!(
+            single,
+            [ComponentValue::Token(t)] if matches!(
+                t.kind,
+                TokenKind::Number { ty: crate::syntax::NumericType::Integer, .. }
+            )
+        ),
+        "<length-percentage>" => parse_length_percentage(single, false, true).is_some(),
+        "<color>" => parse_color(single).is_some(),
+        _ => true,
+    }
 }
 
 /// True if any `var()` appears in `values`, at any depth.

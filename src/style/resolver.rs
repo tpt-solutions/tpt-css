@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Copyright (c) 2026 TPT Solutions
 
-//! Style resolution (spec 8.2, 16.1).
+//! Style resolution (spec 8.2, 13, 16.1).
 //!
-//! Per target (an element, or one pseudo-element), the resolver collects the
-//! matching rules into a [`Cascaded`] set. It then computes values in
-//! dependency order: custom properties first, then font-size, color,
+//! Per target (an element, or one pseudo-element), the resolver collects every
+//! candidate declaration into a [`Cascaded`] set. It then picks winners per
+//! property, handling `revert` and `revert-layer` (spec 13.8), and computes
+//! values in dependency order: custom properties first, then font-size, color,
 //! font-weight, and the rest. Each step applies inheritance and CSS-wide
-//! keywords. `var()` is substituted at computed-value time (spec 13.7), and
-//! shorthands are expanded before the cascade (spec 13.6).
+//! keywords. `var()` is substituted at computed-value time (spec 13.7).
 //!
-//! Media conditions are evaluated once per resolve call, and only rules whose
-//! conditions hold take part in matching.
+//! Rules are flattened once, at `add_stylesheet`. Each flat rule records its
+//! `@media` and `@container` conditions, its cascade layer, and whether a selector
+//! uses `:visited`. Media conditions are evaluated once per resolve call.
+//! Container conditions are evaluated per element, through the host's
+//! [`ContainerSizeProvider`].
 //!
 //! Tree traversal uses an explicit stack, so deep trees cannot overflow the call
 //! stack. Incremental restyle is in [`crate::style::invalidation`].
@@ -19,22 +22,23 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ast::{
-    Combinator, ComplexSelector, Declaration, MediaQuery, PseudoClass, Rule, SelectorList,
-    SimpleSelector, Stylesheet,
+    Combinator, ComplexSelector, Declaration, FontFaceRule, KeyframesRule, MediaFeature,
+    MediaQuery, PseudoClass, Rule, SelectorList, SimpleSelector, Stylesheet,
 };
 use crate::cascade::order::DeclarationOrder;
 use crate::cascade::origin::Origin;
-use crate::cascade::CascadeKey;
+use crate::cascade::{layer_rank, CascadeKey, UNLAYERED_IMPORTANT, UNLAYERED_NORMAL};
+use crate::env::container::{features_match, ContainerSizeProvider};
 use crate::env::{media, Environment};
 use crate::limits::ParseLimits;
-use crate::properties::registry::{ids, spec, PROPERTIES};
+use crate::properties::registry::{ids, lookup, spec, PROPERTIES};
 use crate::properties::shorthand::{expand, shorthand_index, SHORTHANDS};
-use crate::properties::{lookup, parse_property_value, CssWide, PropertyId, SpecifiedValue};
+use crate::properties::{parse_property_value, CssWide, PropertyId, SpecifiedValue};
 use crate::selectors::matching::matches_complex;
 use crate::selectors::{PseudoElement, Specificity};
 use crate::style::computed::{compute_value, ComputeContext, ComputedStyle, StyleMap};
 use crate::style::custom::{
-    contains_var, resolve_customs, substitute, CustomPropertyValue, MapResolver,
+    contains_var, resolve_customs, substitute, CustomPropertyValue, MapResolver, RegisteredProperty,
 };
 use crate::syntax::{trim_whitespace, ComponentValue, TokenKind};
 use crate::tree::{NodeId, NodeKind, StyleTree};
@@ -44,11 +48,32 @@ use crate::values::{Color, Value};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SheetId(pub u32);
 
+/// Whether `:visited` is honored (spec 20.2).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum VisitedPolicy {
+    /// Web semantics. A selector with `:visited` applies only to the color
+    /// properties (`color`, `background-color`, `border-*-color`), so that a
+    /// page cannot learn history from other properties.
+    #[default]
+    Restricted,
+    /// AppFront mode. A selector with `:visited` never matches.
+    Disabled,
+}
+
 /// Resolver configuration.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ResolverConfig {
     /// Limits applied during matching and substitution (spec 20.3).
     pub limits: ParseLimits,
+    /// Visited-link policy (spec 20.2).
+    pub visited: VisitedPolicy,
+}
+
+/// A `@container` condition attached to a rule.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ContainerCondition {
+    pub name: Option<String>,
+    pub features: Vec<MediaFeature>,
 }
 
 /// What a declaration sets.
@@ -68,13 +93,20 @@ pub(crate) struct CompiledDecl {
     pub important: bool,
 }
 
+/// A style rule after flattening: its nesting conditions are attached, not
+/// nested.
 #[derive(Debug, Clone)]
 pub(crate) struct CompiledRule {
     pub selectors: SelectorList,
     pub decls: Vec<CompiledDecl>,
-    /// Media conditions from enclosing `@media` rules. Each entry is a query list,
-    /// and every entry must match for the rule to apply.
+    /// `@media` query lists from enclosing rules. Every list must match.
     pub conditions: Vec<Vec<MediaQuery>>,
+    /// `@container` conditions from enclosing rules. Every condition must match.
+    pub containers: Vec<ContainerCondition>,
+    /// The cascade layer index, or `None` if unlayered.
+    pub layer: Option<usize>,
+    /// Per selector: whether it contains `:visited`.
+    pub visited: Vec<bool>,
     /// True if a selector depends on sibling structure, so a change to one node
     /// may affect its siblings.
     pub structural: bool,
@@ -87,59 +119,37 @@ pub(crate) struct LoadedSheet {
     pub rules: Vec<CompiledRule>,
 }
 
-/// The winning declaration for one property or custom property.
+/// The winning declaration for one property or custom property, with its key.
 #[derive(Debug, Clone)]
 pub(crate) struct Winner {
     pub value: SpecifiedValue,
     pub key: CascadeKey,
 }
 
-/// Winning declarations for one target: an element, or one pseudo-element.
+/// All candidate declarations for one target: an element, or one pseudo-element.
+/// Winners are picked later, because `revert` needs the lower candidates.
 #[derive(Debug, Clone)]
 pub(crate) struct Cascaded {
-    pub props: Vec<Option<Winner>>,
-    pub custom: BTreeMap<String, Winner>,
+    pub props: Vec<Vec<Winner>>,
+    pub custom: BTreeMap<String, Vec<Winner>>,
 }
 
 impl Cascaded {
     pub(crate) fn new() -> Cascaded {
         Cascaded {
-            props: vec![None; PROPERTIES.len()],
+            props: vec![Vec::new(); PROPERTIES.len()],
             custom: BTreeMap::new(),
         }
     }
 
-    /// Offers a declaration to this target. The higher cascade key wins (spec 13.3).
     fn offer(&mut self, target: &DeclTarget, value: &SpecifiedValue, key: CascadeKey) {
+        let winner = Winner {
+            value: value.clone(),
+            key,
+        };
         match target {
-            DeclTarget::Prop(id) => {
-                let slot = &mut self.props[id.index()];
-                let replace = match slot {
-                    None => true,
-                    Some(current) => key > current.key,
-                };
-                if replace {
-                    *slot = Some(Winner {
-                        value: value.clone(),
-                        key,
-                    });
-                }
-            }
-            DeclTarget::Custom(name) => {
-                let replace = match self.custom.get(name) {
-                    None => true,
-                    Some(current) => key > current.key,
-                };
-                if replace {
-                    self.custom.insert(
-                        name.clone(),
-                        Winner {
-                            value: value.clone(),
-                            key,
-                        },
-                    );
-                }
-            }
+            DeclTarget::Prop(id) => self.props[id.index()].push(winner),
+            DeclTarget::Custom(name) => self.custom.entry(name.clone()).or_default().push(winner),
         }
     }
 }
@@ -160,12 +170,21 @@ pub(crate) struct Cache {
     pub env: Environment,
 }
 
+/// Context carried down while flattening a stylesheet.
+#[derive(Debug, Clone, Default)]
+struct FlattenCtx {
+    conditions: Vec<Vec<MediaQuery>>,
+    containers: Vec<ContainerCondition>,
+    layer: Option<usize>,
+    layer_path: Option<String>,
+}
+
 /// Resolves computed styles for trees that implement [`StyleTree`].
 ///
 /// The resolver keeps the last result so that [`StyleResolver::restyle`] can
 /// recompute only the parts of the tree that changed. See
 /// [`crate::style::invalidation`].
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct StyleResolver {
     pub(crate) config: ResolverConfig,
     pub(crate) sheets: Vec<LoadedSheet>,
@@ -174,6 +193,25 @@ pub struct StyleResolver {
     pub(crate) dirty: BTreeSet<NodeId>,
     pub(crate) full_dirty: bool,
     pub(crate) last_restyled: usize,
+    /// Cascade layers in order of first declaration (spec 13.4).
+    pub(crate) layers: BTreeMap<String, usize>,
+    pub(crate) layer_count: usize,
+    pub(crate) anon_layers: usize,
+    /// `@property` registrations (later ones replace earlier ones).
+    pub(crate) registered: BTreeMap<String, RegisteredProperty>,
+    keyframes: BTreeMap<String, KeyframesRule>,
+    font_faces: Vec<FontFaceRule>,
+    pub(crate) containers: Option<Box<dyn ContainerSizeProvider>>,
+}
+
+impl std::fmt::Debug for StyleResolver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StyleResolver")
+            .field("sheets", &self.sheets.len())
+            .field("layers", &self.layer_count)
+            .field("config", &self.config)
+            .finish_non_exhaustive()
+    }
 }
 
 impl StyleResolver {
@@ -185,16 +223,35 @@ impl StyleResolver {
         }
     }
 
+    /// Sets the container size provider used by `@container` (spec 16.5). Sizes
+    /// are read at the next [`StyleResolver::resolve`]. Restyle recomputes all
+    /// styles while a provider is set.
+    pub fn set_container_provider(&mut self, provider: Box<dyn ContainerSizeProvider>) {
+        self.containers = Some(provider);
+        self.full_dirty = true;
+    }
+
+    /// The `@keyframes` rule with this name, if one was parsed. Interpolation is
+    /// not implemented yet, so this gives the rule as written.
+    pub fn keyframes(&self, name: &str) -> Option<&KeyframesRule> {
+        self.keyframes.get(name)
+    }
+
+    /// The `@font-face` rules that were parsed, in source order.
+    pub fn font_faces(&self) -> &[FontFaceRule] {
+        &self.font_faces
+    }
+
     /// Adds a parsed stylesheet with the given origin (spec 8.2).
     ///
     /// Declarations that name unknown properties or have invalid values are
     /// ignored here, since the parser already reported them. Rules inside
-    /// `@media` keep their conditions and apply only when those hold.
+    /// `@media`, `@container`, and `@layer` keep their conditions and layer.
     pub fn add_stylesheet(&mut self, sheet: Stylesheet, origin: Origin) -> SheetId {
         let id = SheetId(self.next_sheet);
         self.next_sheet += 1;
         let mut rules = Vec::new();
-        flatten_rules(sheet.rules, &[], &mut rules);
+        self.flatten(sheet.rules, &FlattenCtx::default(), &mut rules);
         self.sheets.push(LoadedSheet { id, origin, rules });
         self.full_dirty = true;
         id
@@ -240,7 +297,39 @@ impl StyleResolver {
             .collect()
     }
 
-    /// Collects the cascaded declarations for each target of `node` (spec 13).
+    /// Whether the `@container` conditions of a rule hold for `node`.
+    fn containers_match<T: StyleTree>(
+        &self,
+        tree: &T,
+        node: NodeId,
+        conditions: &[ContainerCondition],
+    ) -> bool {
+        if conditions.is_empty() {
+            return true;
+        }
+        let Some(provider) = self.containers.as_deref() else {
+            return false;
+        };
+        let root_fs = self.cache.as_ref().map_or(16.0, |c| c.env.root_font_size);
+        conditions.iter().all(|cond| {
+            let mut current = tree.parent(node);
+            while let Some(ancestor) = current {
+                if let Some(info) = provider.container(ancestor) {
+                    let named = cond
+                        .name
+                        .as_ref()
+                        .map_or(true, |n| info.name.as_deref() == Some(n.as_str()));
+                    if named {
+                        return features_match(&cond.features, &info, root_fs);
+                    }
+                }
+                current = tree.parent(ancestor);
+            }
+            false
+        })
+    }
+
+    /// Collects every candidate declaration for each target of `node` (spec 13).
     pub(crate) fn cascade<T: StyleTree>(
         &self,
         tree: &T,
@@ -252,10 +341,16 @@ impl StyleResolver {
 
         for (sheet_pos, sheet) in self.sheets.iter().enumerate() {
             for (rule_idx, rule) in sheet.rules.iter().enumerate() {
-                if !active[sheet_pos][rule_idx] {
+                if !active[sheet_pos][rule_idx]
+                    || !self.containers_match(tree, node, &rule.containers)
+                {
                     continue;
                 }
-                for selector in &rule.selectors.selectors {
+                for (sel_idx, selector) in rule.selectors.selectors.iter().enumerate() {
+                    let uses_visited = rule.visited.get(sel_idx).copied().unwrap_or(false);
+                    if uses_visited && self.config.visited == VisitedPolicy::Disabled {
+                        continue;
+                    }
                     let mut budget = max_steps;
                     if !matches_complex(tree, node, selector, &mut budget) {
                         continue;
@@ -264,9 +359,13 @@ impl StyleResolver {
                         .entry(selector.pseudo_element.clone())
                         .or_insert_with(Cascaded::new);
                     for (decl_idx, decl) in rule.decls.iter().enumerate() {
+                        if uses_visited && visited_restricted(&decl.target) {
+                            continue;
+                        }
                         let key = CascadeKey {
                             origin: sheet.origin,
                             important: decl.important,
+                            layer: layer_key(rule.layer, decl.important),
                             inline: false,
                             specificity: selector.specificity,
                             order: DeclarationOrder {
@@ -289,6 +388,7 @@ impl StyleResolver {
                     let key = CascadeKey {
                         origin: Origin::Author,
                         important: compiled.important,
+                        layer: layer_key(None, compiled.important),
                         inline: true,
                         specificity: Specificity::default(),
                         order: DeclarationOrder::inline(index),
@@ -300,36 +400,151 @@ impl StyleResolver {
         }
         out
     }
-}
 
-/// Flattens `@media` groups into a list of style rules, keeping each group's
-/// conditions.
-fn flatten_rules(rules: Vec<Rule>, conditions: &[Vec<MediaQuery>], out: &mut Vec<CompiledRule>) {
-    for rule in rules {
-        match rule {
-            Rule::Style(style) => {
-                let decls = style
-                    .declarations
-                    .declarations
-                    .iter()
-                    .flat_map(compile_declaration)
-                    .collect();
-                let structural = style.selectors.selectors.iter().any(selector_is_structural);
-                out.push(CompiledRule {
-                    selectors: style.selectors,
-                    decls,
-                    conditions: conditions.to_vec(),
-                    structural,
-                });
+    /// Returns the layer index for `name`, registering it on first use. The
+    /// order is the order of first declaration (spec 13.4).
+    fn layer_index(&mut self, name: &str) -> usize {
+        if let Some(&index) = self.layers.get(name) {
+            return index;
+        }
+        let index = self.layer_count;
+        self.layer_count += 1;
+        self.layers.insert(name.to_string(), index);
+        index
+    }
+
+    /// Flattens a rule list into `out`, recording the nesting conditions on each
+    /// style rule. Registrations (`@layer`, `@property`) take effect in document
+    /// order.
+    fn flatten(&mut self, rules: Vec<Rule>, ctx: &FlattenCtx, out: &mut Vec<CompiledRule>) {
+        for rule in rules {
+            match rule {
+                Rule::Style(style) => {
+                    let decls = style
+                        .declarations
+                        .declarations
+                        .iter()
+                        .flat_map(compile_declaration)
+                        .collect();
+                    let visited = style
+                        .selectors
+                        .selectors
+                        .iter()
+                        .map(selector_has_visited)
+                        .collect();
+                    let structural = style.selectors.selectors.iter().any(selector_is_structural);
+                    out.push(CompiledRule {
+                        selectors: style.selectors,
+                        decls,
+                        conditions: ctx.conditions.clone(),
+                        containers: ctx.containers.clone(),
+                        layer: ctx.layer,
+                        visited,
+                        structural,
+                    });
+                }
+                Rule::Media(media_rule) => {
+                    let mut child = ctx.clone();
+                    child.conditions.push(media_rule.queries);
+                    self.flatten(media_rule.rules, &child, out);
+                }
+                Rule::Supports(supports) => {
+                    if supports.supported {
+                        self.flatten(supports.rules, ctx, out);
+                    }
+                }
+                Rule::Container(container) => {
+                    let mut child = ctx.clone();
+                    child.containers.push(ContainerCondition {
+                        name: container.name,
+                        features: container.features,
+                    });
+                    self.flatten(container.rules, &child, out);
+                }
+                Rule::Layer(layer) => match layer.rules {
+                    None => {
+                        for name in layer.names {
+                            let full = join_layer(ctx.layer_path.as_deref(), &name);
+                            self.layer_index(&full);
+                        }
+                    }
+                    Some(inner) => {
+                        let name = layer.names.into_iter().next().unwrap_or_default();
+                        let full = if name.is_empty() {
+                            self.anon_layers += 1;
+                            format!("\u{1}anonymous-{}", self.anon_layers)
+                        } else {
+                            join_layer(ctx.layer_path.as_deref(), &name)
+                        };
+                        let index = self.layer_index(&full);
+                        let mut child = ctx.clone();
+                        child.layer = Some(index);
+                        child.layer_path = Some(full);
+                        self.flatten(inner, &child, out);
+                    }
+                },
+                Rule::Property(property) => {
+                    self.registered.insert(
+                        property.name,
+                        RegisteredProperty {
+                            syntax: property.syntax,
+                            inherits: property.inherits,
+                            initial: property.initial,
+                        },
+                    );
+                }
+                Rule::Keyframes(keyframes) => {
+                    self.keyframes.insert(keyframes.name.clone(), keyframes);
+                }
+                Rule::FontFace(font_face) => self.font_faces.push(font_face),
+                Rule::Unknown(_) => {}
             }
-            Rule::Media(media_rule) => {
-                let mut nested = conditions.to_vec();
-                nested.push(media_rule.queries);
-                flatten_rules(media_rule.rules, &nested, out);
-            }
-            Rule::Unknown(_) => {}
         }
     }
+}
+
+/// The name of a layer nested under `parent`.
+fn join_layer(parent: Option<&str>, name: &str) -> String {
+    match parent {
+        Some(p) => format!("{p}.{name}"),
+        None => name.to_string(),
+    }
+}
+
+/// The layer rank for a declaration in `layer` (see [`layer_rank`]).
+fn layer_key(layer: Option<usize>, important: bool) -> u32 {
+    match layer {
+        Some(index) => layer_rank(index, important),
+        None if important => UNLAYERED_IMPORTANT,
+        None => UNLAYERED_NORMAL,
+    }
+}
+
+/// `:visited` restricts a selector to color properties (spec 20.2).
+fn visited_restricted(target: &DeclTarget) -> bool {
+    match target {
+        DeclTarget::Prop(id) => {
+            let name = spec(*id).name;
+            !(name == "color"
+                || name == "background-color"
+                || (name.starts_with("border-") && name.ends_with("-color")))
+        }
+        DeclTarget::Custom(_) => true,
+    }
+}
+
+/// True if a selector contains `:visited`, including inside `:is()`, `:not()`,
+/// and `:where()`.
+fn selector_has_visited(selector: &ComplexSelector) -> bool {
+    selector.compounds.iter().any(|compound| {
+        compound.simple.iter().any(|simple| match simple {
+            SimpleSelector::PseudoClass(PseudoClass::Visited) => true,
+            SimpleSelector::Is(list) | SimpleSelector::Not(list) | SimpleSelector::Where(list) => {
+                list.selectors.iter().any(selector_has_visited)
+            }
+            _ => false,
+        })
+    })
 }
 
 /// True if a selector depends on sibling structure.
@@ -377,13 +592,21 @@ pub(crate) fn style_tree<T: StyleTree>(
                     root_fs,
                     env,
                     max_var_depth,
+                    &resolver.registered,
                 );
 
                 map.clear_pseudo(frame.node);
                 for (target, cas) in targets {
                     if let Some(pseudo) = target {
-                        let pstyle = compute_style(&cas, Some(&style), root_fs, env, max_var_depth);
-                        if is_generated(&pstyle) {
+                        let pstyle = compute_style(
+                            &cas,
+                            Some(&style),
+                            root_fs,
+                            env,
+                            max_var_depth,
+                            &resolver.registered,
+                        );
+                        if is_generated(&pseudo, &pstyle) {
                             map.insert_pseudo(frame.node, pseudo, pstyle);
                         }
                     }
@@ -416,28 +639,52 @@ pub(crate) fn style_tree<T: StyleTree>(
     styled
 }
 
-/// A pseudo-element is generated only when its `content` is not `none` or `normal`.
-fn is_generated(style: &ComputedStyle) -> bool {
-    !matches!(
-        style.raw(ids::CONTENT),
-        Value::Keyword("none") | Value::Keyword("normal")
-    )
+/// A pseudo-element is generated when its `content` is not `none` or `normal`,
+/// or always for the pseudo-elements that have no `content` (`::selection`,
+/// `::backdrop`, `::file-selector-button`, CSS Pseudo-Elements 4).
+fn is_generated(pseudo: &PseudoElement, style: &ComputedStyle) -> bool {
+    match pseudo {
+        PseudoElement::Selection | PseudoElement::Backdrop | PseudoElement::FileSelectorButton => {
+            true
+        }
+        _ => !matches!(
+            style.raw(ids::CONTENT),
+            Value::Keyword("none") | Value::Keyword("normal")
+        ),
+    }
 }
 
-/// Computes the style of one target from its cascaded declarations.
+/// The winning candidate for a custom property (revert is treated as unset).
+fn custom_declared(candidates: &[Winner]) -> Option<SpecifiedValue> {
+    let winner = candidates.iter().max_by(|a, b| a.key.cmp(&b.key))?;
+    Some(match &winner.value {
+        SpecifiedValue::CssWide(CssWide::Revert | CssWide::RevertLayer) => {
+            SpecifiedValue::CssWide(CssWide::Unset)
+        }
+        other => other.clone(),
+    })
+}
+
+/// Computes the style of one target from its candidate declarations.
 fn compute_style(
     cas: &Cascaded,
     parent: Option<&ComputedStyle>,
     root_fs: f64,
     env: &Environment,
     max_var_depth: usize,
+    registered: &BTreeMap<String, RegisteredProperty>,
 ) -> ComputedStyle {
     let declared: BTreeMap<String, SpecifiedValue> = cas
         .custom
         .iter()
-        .map(|(name, w)| (name.clone(), w.value.clone()))
+        .filter_map(|(name, cands)| custom_declared(cands).map(|v| (name.clone(), v)))
         .collect();
-    let customs = resolve_customs(&declared, parent.map(|p| p.customs()), max_var_depth);
+    let customs = resolve_customs(
+        &declared,
+        parent.map(|p| p.customs()),
+        registered,
+        max_var_depth,
+    );
 
     let parent_font_size = parent.map_or(env.root_font_size, |p| p.font_size());
     let parent_color = parent.map_or(Color::BLACK, |p| p.color());
@@ -451,18 +698,13 @@ fn compute_style(
         parent_weight,
         viewport_width: env.viewport.width,
         viewport_height: env.viewport.height,
+        dark: env.media.prefers_dark,
     };
 
     let mut values: Vec<Value> = PROPERTIES.iter().map(|p| p.initial.to_value()).collect();
     for idx in compute_order() {
         let id = PropertyId(idx as u16);
-        let specified = specified_value(
-            idx,
-            cas.props[idx].as_ref(),
-            parent,
-            &customs,
-            max_var_depth,
-        );
+        let specified = specified_value(idx, &cas.props[idx], parent, &customs, max_var_depth);
         let computed = compute_value(id, spec(id).grammar, specified, &ctx);
         if id == ids::FONT_SIZE {
             if let Value::Length { value, .. } = computed {
@@ -507,23 +749,47 @@ fn compute_order() -> impl Iterator<Item = usize> {
         .chain((0..PROPERTIES.len()).filter(move |i| !first.contains(i)))
 }
 
+/// Picks the value that applies to one property from its candidates (spec 13.3,
+/// 13.8). `revert` rolls back to the candidates of lower origins, and
+/// `revert-layer` to the candidates of the same origin in lower layers. When no
+/// candidate is left, the result is unset. `None` also means unset.
+fn resolve_winner(
+    candidates: &[Winner],
+    idx: usize,
+    customs: &BTreeMap<String, CustomPropertyValue>,
+    max_var_depth: usize,
+) -> Option<SpecifiedValue> {
+    let mut pool: Vec<&Winner> = candidates.iter().collect();
+    loop {
+        let winner = pool.iter().copied().max_by(|a, b| a.key.cmp(&b.key))?;
+        match &winner.value {
+            SpecifiedValue::CssWide(CssWide::Revert) => {
+                let origin = winner.key.origin.index();
+                pool.retain(|c| c.key.origin.index() < origin);
+            }
+            SpecifiedValue::CssWide(CssWide::RevertLayer) => {
+                let (origin, layer) = (winner.key.origin, winner.key.layer);
+                pool.retain(|c| c.key.origin == origin && c.key.layer < layer);
+            }
+            SpecifiedValue::Unparsed { tokens, shorthand } => {
+                return resolve_unparsed(idx, tokens, *shorthand, customs, max_var_depth);
+            }
+            other => return Some(other.clone()),
+        }
+    }
+}
+
 /// Resolves the winning declaration for property `idx` to a value (spec 13.8).
 fn specified_value(
     idx: usize,
-    winner: Option<&Winner>,
+    candidates: &[Winner],
     parent: Option<&ComputedStyle>,
     customs: &BTreeMap<String, CustomPropertyValue>,
     max_var_depth: usize,
 ) -> Value {
     let info = &PROPERTIES[idx];
-    let concrete = match winner.map(|w| &w.value) {
-        None => SpecifiedValue::CssWide(CssWide::Unset),
-        Some(SpecifiedValue::Unparsed { tokens, shorthand }) => {
-            resolve_unparsed(idx, tokens, *shorthand, customs, max_var_depth)
-                .unwrap_or(SpecifiedValue::CssWide(CssWide::Unset))
-        }
-        Some(other) => other.clone(),
-    };
+    let concrete = resolve_winner(candidates, idx, customs, max_var_depth)
+        .unwrap_or(SpecifiedValue::CssWide(CssWide::Unset));
     let initial = || info.initial.to_value();
     let inherit = || match parent {
         Some(p) => p.raw(PropertyId(idx as u16)).clone(),
@@ -533,14 +799,14 @@ fn specified_value(
         SpecifiedValue::Value(v) => v,
         SpecifiedValue::CssWide(CssWide::Initial) => initial(),
         SpecifiedValue::CssWide(CssWide::Inherit) => inherit(),
-        SpecifiedValue::CssWide(CssWide::Unset) => {
+        SpecifiedValue::CssWide(_) => {
             if info.inherited {
                 inherit()
             } else {
                 initial()
             }
         }
-        // Substitution produces a parsed value, never another unparsed one.
+        // Resolution never returns an unparsed value.
         SpecifiedValue::Unparsed { .. } => initial(),
     }
 }
@@ -573,7 +839,9 @@ fn resolve_unparsed(
 /// Looks up and parses a declaration, expanding shorthands (spec 13.6, 15.3).
 ///
 /// A value that contains `var()` stays unparsed, along with the shorthand it
-/// came from if any. Unknown properties and invalid values yield nothing.
+/// came from if any. `all` sets every property except `direction` and
+/// `unicode-bidi` (CSS Cascade 4), and accepts only CSS-wide keywords.
+/// Unknown properties and invalid values yield nothing.
 pub(crate) fn compile_declaration(decl: &Declaration) -> Vec<CompiledDecl> {
     let important = decl.important;
     if decl.property.starts_with("--") {
@@ -589,6 +857,22 @@ pub(crate) fn compile_declaration(decl: &Declaration) -> Vec<CompiledDecl> {
             value,
             important,
         }];
+    }
+
+    if decl.property == "all" {
+        let Some(wide) = css_wide_only(&decl.value) else {
+            return Vec::new();
+        };
+        let excluded = [lookup("direction"), lookup("unicode-bidi")];
+        return (0..PROPERTIES.len())
+            .map(|i| PropertyId(i as u16))
+            .filter(|id| !excluded.contains(&Some(*id)))
+            .map(|id| CompiledDecl {
+                target: DeclTarget::Prop(id),
+                value: SpecifiedValue::CssWide(wide),
+                important,
+            })
+            .collect();
     }
 
     let has_var = contains_var(&decl.value);
@@ -654,6 +938,8 @@ fn css_wide_only(values: &[ComponentValue]) -> Option<CssWide> {
                 "initial" => Some(CssWide::Initial),
                 "inherit" => Some(CssWide::Inherit),
                 "unset" => Some(CssWide::Unset),
+                "revert" => Some(CssWide::Revert),
+                "revert-layer" => Some(CssWide::RevertLayer),
                 _ => None,
             },
             _ => None,

@@ -29,6 +29,18 @@ impl Origin {
     ///
     /// Animation and transition declarations have one rank each. CSS Cascade 5
     /// does not define an important flag for them, so `important` is ignored.
+    /// The origin's position in the origin list, ignoring importance. Used by
+    /// `revert`, which rolls back to the origin below (spec 13.8).
+    pub const fn index(self) -> u8 {
+        match self {
+            Origin::UserAgent => 0,
+            Origin::User => 1,
+            Origin::Author => 2,
+            Origin::Animation => 3,
+            Origin::Transition => 4,
+        }
+    }
+
     pub const fn precedence(self, important: bool) -> u8 {
         match (self, important) {
             (Origin::UserAgent, false) => 0,

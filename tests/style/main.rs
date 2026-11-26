@@ -7,6 +7,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 mod m1;
+mod m2;
 
 use common::{style_of, style_with, TestTree};
 use tpt_css::properties::ids;
@@ -339,8 +340,13 @@ fn css_wide_keywords_are_recognised_for_any_property() {
             Ok(tpt_css::properties::SpecifiedValue::CssWide(_))
         ));
     }
-    // revert is valid CSS but needs M2 origin tracking, so it is rejected for now.
-    assert!(parse_property_value(spec(lookup("width").unwrap()), &build("revert")).is_err());
+    // revert and revert-layer are CSS-wide keywords (spec 13.8) as of M2.
+    for keyword in ["revert", "revert-layer"] {
+        assert!(matches!(
+            parse_property_value(spec(lookup("width").unwrap()), &build(keyword)),
+            Ok(tpt_css::properties::SpecifiedValue::CssWide(_))
+        ));
+    }
 }
 
 fn build(css: &str) -> Vec<tpt_css::syntax::ComponentValue> {

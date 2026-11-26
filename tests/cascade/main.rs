@@ -6,6 +6,7 @@
 
 #[path = "../common/mod.rs"]
 mod common;
+mod layers;
 mod media;
 
 use common::{parse_sheet, TestTree};
@@ -28,6 +29,7 @@ fn key(
     CascadeKey {
         origin,
         important,
+        layer: tpt_css::cascade::UNLAYERED_NORMAL,
         inline,
         specificity: spec,
         order,

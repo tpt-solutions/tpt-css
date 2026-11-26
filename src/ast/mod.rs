@@ -12,7 +12,10 @@ pub mod stylesheet;
 
 pub use declaration::{Declaration, DeclarationBlock};
 pub use media::{Comparison, MediaFeature, MediaQuery, MediaType, PointerKind};
-pub use rule::{MediaRule, Rule, StyleRule, UnknownAtRule};
+pub use rule::{
+    ContainerRule, FontFaceRule, Keyframe, KeyframesRule, LayerRule, MediaRule, PropertyRule, Rule,
+    StyleRule, SupportsRule, UnknownAtRule,
+};
 pub use selector::{
     AttributeMatcher, AttributeOperator, AttributeSelector, Combinator, ComplexSelector,
     CompoundSelector, NthSelector, PseudoClass, SelectorList, SimpleSelector,

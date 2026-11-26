@@ -12,6 +12,7 @@ pub(crate) mod media;
 pub mod rules;
 pub mod selectors;
 pub mod stylesheet;
+pub(crate) mod supports;
 
 use crate::limits::ParseLimits;
 use crate::syntax::{ComponentValue, SourceId};

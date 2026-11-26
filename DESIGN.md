@@ -188,3 +188,68 @@ it for M1.
 - Tier 2 selectors (`:has()`, `:focus-visible`, and the rest), `@layer`,
   `@supports`, `@container`, `@scope`, `@property`, nesting, and `revert`.
 - Precise invalidation (M3) and CSSOM (M3).
+
+## 7. M2 decisions and deviations
+
+M2 adds cascade layers, `revert` and `revert-layer`, `all`, `@supports`, CSS
+nesting, `@container` with a host-supplied size provider, `@property`, stored
+`@keyframes` and `@font-face`, `light-dark()`, the modern state pseudo-classes,
+and the visited-link policy. The items still missing are listed at the end.
+
+### Decisions
+
+1. **Candidates are kept until resolution.** The cascade collects every candidate
+   declaration per property, and winners are picked in `resolve_winner`. `revert`
+   needs the lower-origin candidates, which a single pre-picked winner cannot
+   provide.
+2. **Layers are ranks in the cascade key.** Normal declarations rank later layers
+   higher. Important declarations rank earlier layers higher, and unlayered
+   important declarations rank lowest (spec 13.4). The key order is origin and
+   importance, then layer, then inline, then specificity, then order.
+3. **Layer order is the order of first declaration.** A statement such as
+   `@layer a, b;` fixes it. Nested layers are named with dots, so `a.b` declared
+   inside `a` is the same layer as a top-level `a.b`. Anonymous blocks each get
+   their own layer.
+4. **`revert` pools by origin, `revert-layer` by layer.** `revert` takes the best
+   candidate of a lower origin. `revert-layer` takes the best candidate of the same
+   origin in a lower layer. With no candidate left, both are unset. For
+   `revert-layer` in unlayered rules, the last named layer counts as the lower one.
+5. **`@supports` is evaluated at parse time.** Its condition depends only on the
+   engine's capabilities, so the rule is kept or dropped then. Support is checked
+   against the real property registry, grammar, and selector parser.
+6. **Nesting is resolved at parse time.** A nested selector has its `&` replaced by
+   `:is(parent)`. A selector with no `&` gets an implicit descendant prefix. The
+   resolved rule then matches on its own, so the matcher has no nesting case.
+   Specificity follows from `:is()`, which takes the most specific argument, as
+   CSS Nesting specifies.
+7. **Container queries need a provider.** The host implements
+   `ContainerSizeProvider`. A condition is evaluated against the nearest ancestor
+   that is a container, and whose name matches if the query has one. Without a
+   provider, container rules never apply. While a provider is set, restyle
+   recomputes everything, because size changes are not tracked by invalidation.
+8. **`@property` values are checked against `syntax`.** The checked syntaxes are
+   `*`, `<length>`, `<number>`, `<integer>`, `<percentage>`, `<length-percentage>`,
+   and `<color>`. Other syntaxes are accepted without a check. A value that fails
+   the check uses the registered initial value. `inherits` decides whether an
+   unset registered property inherits or takes its initial value.
+9. **`all` skips `direction` and `unicode-bidi`**, as CSS Cascade 4 specifies. It
+   accepts only CSS-wide keywords.
+10. **`light-dark()` is resolved at computed time** from the environment's color
+    scheme. The specified value keeps both colors.
+11. **`:visited` follows the spec 20.2 policy.** In `Restricted` mode (the default),
+    a selector with `:visited` applies only to the color properties. In `Disabled`
+    mode it never matches. Custom properties are always excluded from `:visited`.
+12. **Animation origin is a cascade input only.** `add_stylesheet` with
+    `Origin::Animation` gives the usual precedence. Keyframes are parsed and stored,
+    but nothing drives an animation yet.
+
+### Still not implemented at the end of M2
+
+- Cascade scope proximity, `@scope`, `:scope`, and `:has()` (all M2 items, still open).
+  `::slotted()`, `::part()`, and `:host` are M4.
+- Keyframe interpolation and the animation and transition drivers (spec 3 places
+  drivers outside the engine).
+- `color()`, relative color syntax, and `lab()`/`lch()`/`oklab()`/`oklch()`.
+- Container units (`cqw`, `cqh`, `cqi`, `cqb`, `cqmin`, `cqmax`).
+- `revert` in custom properties (treated as unset).
+- Style sharing and dependency-indexed invalidation (M3).

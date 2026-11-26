@@ -173,6 +173,9 @@ fn simple_matches<T: StyleTree>(
 ) -> bool {
     match simple {
         SimpleSelector::Universal => true,
+        // Replaced during nesting resolution. A bare `&` reaching the matcher is
+        // a top-level rule and matches nothing.
+        SimpleSelector::Nesting => false,
         SimpleSelector::Type(local) => tree.name(node).local == *local,
         SimpleSelector::Id(id) => tree.attributes(node).id.as_deref() == Some(id.as_str()),
         SimpleSelector::Class(class) => tree.attributes(node).has_class(class),
@@ -271,6 +274,24 @@ fn pseudo_class_matches<T: StyleTree>(tree: &T, node: NodeId, pseudo: PseudoClas
         PseudoClass::ReadOnly => state.contains(StateBits::READ_ONLY),
         PseudoClass::ReadWrite => state.contains(StateBits::READ_WRITE),
         PseudoClass::PlaceholderShown => state.contains(StateBits::PLACEHOLDER_SHOWN),
+        PseudoClass::Link => state.contains(StateBits::LINK),
+        PseudoClass::AnyLink => state.contains(StateBits::ANY_LINK),
+        PseudoClass::Visited => state.contains(StateBits::VISITED),
+        PseudoClass::FocusVisible => state.contains(StateBits::FOCUS_VISIBLE),
+        PseudoClass::FocusWithin => state.contains(StateBits::FOCUS_WITHIN),
+        PseudoClass::Target => state.contains(StateBits::TARGET),
+        PseudoClass::Valid => state.contains(StateBits::VALID),
+        PseudoClass::Invalid => state.contains(StateBits::INVALID),
+        PseudoClass::UserValid => state.contains(StateBits::USER_VALID),
+        PseudoClass::UserInvalid => state.contains(StateBits::USER_INVALID),
+        PseudoClass::InRange => state.contains(StateBits::IN_RANGE),
+        PseudoClass::OutOfRange => state.contains(StateBits::OUT_OF_RANGE),
+        PseudoClass::Default => state.contains(StateBits::DEFAULT),
+        PseudoClass::Indeterminate => state.contains(StateBits::INDETERMINATE),
+        PseudoClass::Open => state.contains(StateBits::OPEN),
+        PseudoClass::Closed => state.contains(StateBits::CLOSED),
+        PseudoClass::Modal => state.contains(StateBits::MODAL),
+        PseudoClass::PopoverOpen => state.contains(StateBits::POPOVER_OPEN),
     }
 }
 

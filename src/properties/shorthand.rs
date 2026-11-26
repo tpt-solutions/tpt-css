@@ -170,6 +170,8 @@ fn single_css_wide(values: &[ComponentValue]) -> Option<CssWide> {
                 "initial" => Some(CssWide::Initial),
                 "inherit" => Some(CssWide::Inherit),
                 "unset" => Some(CssWide::Unset),
+                "revert" => Some(CssWide::Revert),
+                "revert-layer" => Some(CssWide::RevertLayer),
                 _ => None,
             },
             _ => None,

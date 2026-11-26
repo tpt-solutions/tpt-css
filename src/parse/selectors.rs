@@ -192,6 +192,11 @@ fn parse_compound(
                     simple.push(SimpleSelector::Universal);
                     i += 1;
                 }
+                TokenKind::Delim('&') => {
+                    // Resolved against the parent rule by `resolve_nesting`.
+                    simple.push(SimpleSelector::Nesting);
+                    i += 1;
+                }
                 TokenKind::Ident(name) => {
                     if i != start {
                         return Err(invalid(t.span, "type selector must come first"));
@@ -282,12 +287,118 @@ fn parse_compound(
     Ok((CompoundSelector { simple }, i, pseudo))
 }
 
+/// Replaces every `&` in a nested selector list with the parent selector list
+/// (CSS Nesting). A complex selector with no `&` gets an implicit `& ` descendant
+/// prefix. The result matches on its own, so the matcher needs no nesting case.
+pub(crate) fn resolve_nesting(child: &SelectorList, parent: &SelectorList) -> SelectorList {
+    let selectors = child
+        .selectors
+        .iter()
+        .map(|complex| {
+            let mut had_nesting = false;
+            let mut compounds: Vec<CompoundSelector> = complex
+                .compounds
+                .iter()
+                .map(|compound| CompoundSelector {
+                    simple: compound
+                        .simple
+                        .iter()
+                        .map(|simple| replace_nesting(simple, parent, &mut had_nesting))
+                        .collect(),
+                })
+                .collect();
+            let mut combinators = complex.combinators.clone();
+            if !had_nesting {
+                compounds.insert(
+                    0,
+                    CompoundSelector {
+                        simple: vec![SimpleSelector::Is(parent.clone())],
+                    },
+                );
+                combinators.insert(0, Combinator::Descendant);
+            }
+            let mut out = ComplexSelector {
+                compounds,
+                combinators,
+                pseudo_element: complex.pseudo_element.clone(),
+                specificity: Specificity::default(),
+                span: complex.span,
+            };
+            out.specificity = Specificity::of_complex(&out);
+            out
+        })
+        .collect();
+    SelectorList { selectors }
+}
+
+fn replace_nesting(
+    simple: &SimpleSelector,
+    parent: &SelectorList,
+    had_nesting: &mut bool,
+) -> SimpleSelector {
+    match simple {
+        SimpleSelector::Nesting => {
+            *had_nesting = true;
+            SimpleSelector::Is(parent.clone())
+        }
+        SimpleSelector::Is(list) => SimpleSelector::Is(resolve_inner(list, parent, had_nesting)),
+        SimpleSelector::Not(list) => SimpleSelector::Not(resolve_inner(list, parent, had_nesting)),
+        SimpleSelector::Where(list) => {
+            SimpleSelector::Where(resolve_inner(list, parent, had_nesting))
+        }
+        other => other.clone(),
+    }
+}
+
+/// Resolves `&` inside a functional argument. Such a list never gets the
+/// implicit prefix, so it only replaces `&` in place.
+fn resolve_inner(
+    list: &SelectorList,
+    parent: &SelectorList,
+    had_nesting: &mut bool,
+) -> SelectorList {
+    let selectors = list
+        .selectors
+        .iter()
+        .map(|complex| {
+            let mut out = complex.clone();
+            for compound in &mut out.compounds {
+                for simple in &mut compound.simple {
+                    *simple = replace_nesting(simple, parent, had_nesting);
+                }
+            }
+            out.specificity = Specificity::of_complex(&out);
+            out
+        })
+        .collect();
+    SelectorList { selectors }
+}
+
+/// True if a selector list contains `&` anywhere. Used to reject `&` in a
+/// top-level rule, where it has no meaning in this engine.
+pub(crate) fn contains_nesting(list: &SelectorList) -> bool {
+    list.selectors.iter().any(|c| {
+        c.compounds.iter().any(|comp| {
+            comp.simple.iter().any(|s| match s {
+                SimpleSelector::Nesting => true,
+                SimpleSelector::Is(l) | SimpleSelector::Not(l) | SimpleSelector::Where(l) => {
+                    contains_nesting(l)
+                }
+                _ => false,
+            })
+        })
+    })
+}
+
 fn pseudo_element(name: &str, span: Span) -> Result<PseudoElement, Diagnostic> {
     match name.to_ascii_lowercase().as_str() {
         "before" => Ok(PseudoElement::Before),
         "after" => Ok(PseudoElement::After),
         "marker" => Ok(PseudoElement::Marker),
         "placeholder" => Ok(PseudoElement::Placeholder),
+        "selection" => Ok(PseudoElement::Selection),
+        "backdrop" => Ok(PseudoElement::Backdrop),
+        "file-selector-button" => Ok(PseudoElement::FileSelectorButton),
         _ => Err(unsupported(
             span,
             format!("pseudo-element ::{name} is not supported yet"),
@@ -323,6 +434,24 @@ fn pseudo_class(name: &str, span: Span) -> Result<Vec<SimpleSelector>, Diagnosti
         "read-only" => one(PseudoClass::ReadOnly),
         "read-write" => one(PseudoClass::ReadWrite),
         "placeholder-shown" => one(PseudoClass::PlaceholderShown),
+        "link" => one(PseudoClass::Link),
+        "any-link" => one(PseudoClass::AnyLink),
+        "visited" => one(PseudoClass::Visited),
+        "focus-visible" => one(PseudoClass::FocusVisible),
+        "focus-within" => one(PseudoClass::FocusWithin),
+        "target" => one(PseudoClass::Target),
+        "valid" => one(PseudoClass::Valid),
+        "invalid" => one(PseudoClass::Invalid),
+        "user-valid" => one(PseudoClass::UserValid),
+        "user-invalid" => one(PseudoClass::UserInvalid),
+        "in-range" => one(PseudoClass::InRange),
+        "out-of-range" => one(PseudoClass::OutOfRange),
+        "default" => one(PseudoClass::Default),
+        "indeterminate" => one(PseudoClass::Indeterminate),
+        "open" => one(PseudoClass::Open),
+        "closed" => one(PseudoClass::Closed),
+        "modal" => one(PseudoClass::Modal),
+        "popover-open" => one(PseudoClass::PopoverOpen),
         "first-child" => Ok(vec![nth_plain(false, false)]),
         "last-child" => Ok(vec![nth_plain(true, false)]),
         "only-child" => Ok(vec![nth_plain(false, false), nth_plain(true, false)]),

@@ -41,7 +41,7 @@ impl Specificity {
     /// Specificity of a single simple selector (spec 12.3 rules).
     pub fn of_simple(simple: &SimpleSelector) -> Specificity {
         match simple {
-            SimpleSelector::Universal => Specificity::default(),
+            SimpleSelector::Universal | SimpleSelector::Nesting => Specificity::default(),
             SimpleSelector::Type(_) => Specificity { a: 0, b: 0, c: 1 },
             SimpleSelector::Id(_) => Specificity { a: 1, b: 0, c: 0 },
             SimpleSelector::Class(_)
