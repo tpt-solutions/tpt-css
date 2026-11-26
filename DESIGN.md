@@ -515,6 +515,104 @@ engineering measurements, not claims about other machines (spec 21.1).
     its winning declarations, so the key covers them. Inherited custom properties
     come from the parent's style, so the parent comparison covers them.
 
+36. **Unknown property names are reported at `info` severity.** A declaration whose
+    property is neither in the registry, a shorthand, nor a custom property (`--*`)
+    gets an `info` diagnostic with code `UnknownProperty` (`parse/declarations.rs`,
+    `check_property_name`). The cascade still drops it, as the spec requires for
+    unknown names. It is `info`, not a warning, because many valid properties are not
+    implemented yet (`box-shadow`, `transition`), and a warning would call them
+    unknown. The message says "not implemented by this engine", which is accurate for
+    both a typo and a valid but unsupported name. Vendor-prefixed names are reported
+    the same way.
+
+37. **Pass-through values.** `box-shadow`, `transform`, `transition`, `flex`, and
+    `grid` are registered with `Grammar::PassThrough`: any valid component values
+    are accepted and stored as canonical text (`Value::Raw`, `values/raw.rs`).
+    Canonical means whitespace collapsed, whitespace trimmed inside functions, and
+    strings in double quotes. Numbers are reformatted, so `0.50` reads as `0.5`. A
+    bad string or bad URL token makes the value invalid, as CSS requires. The engine
+    does not check these grammars, so a host must parse the text. `background-image`
+    is typed more narrowly (`Grammar::Image`): `none`, or a comma list of `url()` and
+    the image functions, stored as text, because images are not loaded here.
+38. **Counters.** `counter-reset`, `counter-set`, and `counter-increment` are
+    `Grammar::Counters` (names with optional integers; `none` is allowed). `content`
+    accepts `counter(name[, style])` and `counters(name, separator[, style])`.
+    Styles: `decimal`, `none`, the alphabetic and roman styles. Values outside a
+    style's range fall back to decimal. The rules (`style/counters.rs`, `style_tree`
+    in `style/resolver.rs`):
+    - The style pass visits elements in document order, and the counter state is a
+      stack. Each instance records the depth of the element that created it. Entering
+      an element at depth `k` drops instances created deeper than `k`, so an instance
+      lasts through its creator's following siblings and their descendants.
+    - A reset replaces an instance of the same name at the same depth, which is a
+      previous sibling's, so siblings do not nest. A reset on a deeper element nests.
+    - Element operations run in the order reset, set, increment. Increment or set
+      with no instance in scope creates one on the element. `counter()` with no
+      instance reads 0.
+    - `::after` is generated when the element's subtree is done, through an exit
+      frame, so it sees the counts after its children. A pseudo-element's own
+      operations run before its `content` is read, so its style is computed again when
+      it has any.
+    - Incremental restyle cannot compute counters, so `restyle` falls back to a full
+      resolve when any rule uses counters (`counters_used`), and the equality cutoff
+      is off in that case.
+    - Not done: implicit `list-item` counters, and the `display: list-item` marker.
+
+39. **DOM adapter and the web end-to-end test.** The engine has no HTML parser, and
+    none is added here. The spec puts HTML parsing, `tpt-dom`, and the HTML UA
+    stylesheet in separate crates (spec 5.2). The adapter used in tests is `TestTree`
+    (`tests/common/mod.rs`), an in-memory tree of the tree contract. A reader in
+    `tests/common/markup.rs` builds it from a practical HTML subset: elements, void
+    tags, quoted attributes, `id`, `class`, `style`, text, comments, doctype, and
+    `<style>` text. `tests/integration/web_markup.rs` runs under `--features web`
+    and checks markup to computed styles, including counters, generated content,
+    inline styles, and a restyle. A product DOM adapter should wait for `tpt-dom`
+    and `tpt-html`. Those crates should not be built inside this crate.
+
+40. **Command line and playground share one report.** `src/bin/tpt-css` and the
+    `playground/` crate both include `tools/fixture.rs` and `tools/json.rs` with
+    `#[path]`. Neither is part of the library's API. `check` reports the diagnostics
+    of a stylesheet. `compute` resolves a JSON fixture tree and lists the properties
+    an author style changed. A property counts as changed when it differs from the
+    same tree resolved with no author style, sheets or inline. The playground calls
+    the same functions through three `extern "C"` entry points (`alloc_bytes`,
+    `run`, `free_bytes`). Those raw-pointer functions are outside `src/`, so the
+    engine stays `forbid(unsafe_code)`. The module is built for
+    `wasm32-unknown-unknown` in CI. The JSON reader is small and accepts the
+    standard grammar. It exists because the crate has no dependencies.
+41. **Computed-style snapshots.** Each case in `tests/integration/snapshots.rs`
+    pairs a checked-in stylesheet (`fixtures/mit/`) with a tree in
+    `fixtures/snapshots/` and compares the `compute` output with a `.snap` file. A
+    change fails the test and prints the lines that differ. `TPT_UPDATE_SNAPSHOTS=1`
+    writes new snapshots, which need review like any change. The snapshots list only
+    the properties an author style changed, and they do not list pseudo-elements.
+42. **Generated support table.** `docs/SUPPORT.md` is generated from `PROPERTIES`
+    and `SHORTHANDS` by `tests/integration/support.rs`. The test fails when the file
+    is stale. `TPT_UPDATE_GENERATED=1` rewrites it. The grammar names are matched
+    exhaustively, so a new grammar needs a name. The table has no test-name column.
+
+43. **Shorthand and content gaps closed.** `background` expands to `background-image`
+    and `background-color`, one each, in any order. An omitted image becomes `none`
+    and an omitted color becomes `transparent`, because the shorthand resets both.
+    Layer lists are not supported, and a declaration with one is dropped.
+    `attr()` accepts `attr(name)`, `attr(name string)`, and `attr(name, "fallback")`.
+    The fallback is used when the attribute is missing. Other attribute types are
+    not supported. `display: list-item` elements increment the `list-item` counter
+    implicitly (CSS Lists 3). The increment runs before the explicit increments. The
+    engine has no user-agent stylesheet, so an `ol` does not reset the counter. The
+    author writes `ol { counter-reset: list-item }`. A `display` that may be
+    `list-item` makes restyle do a full resolve.
+44. **Comment spans for tooling.** The tokenizer records the span of each comment.
+    `ParseOptions::preserve_comments` copies them into `ParsedStylesheet::comments`.
+    The default is off, so comments cost nothing in style resolution.
+
+45. **Functional time-dimensional pseudo-classes.** `:current(S)`, `:past(S)`, and
+    `:future(S)` are `SimpleSelector::TimeState`. An element matches when the host
+    sets the state bit and the element matches `S` (Selectors 4). Specificity is
+    `(0,1,0)` plus the most specific argument, as for `:is()`. The variant is handled
+    in matching, specificity, nesting resolution, invalidation (attribute names and
+    the `:has()`, ancestor, and structure flags), and CSSOM serialization.
+
 ### Still open
 
 - Scope proximity is implemented (decision 12). The order matches the Cascade 6 draft. `spec.txt` 13.3 was corrected in a39110c.
@@ -531,9 +629,10 @@ engineering measurements, not claims about other machines (spec 21.1).
   deterministic, which is not the same thing.
 - The WPT subsuites are out of scope (decision 33).
 - Calc depth: the configured `max_calc_depth` is the effective limit (decision 13). The value parser recurses up to 256, the default component nesting limit.
-- Long-tail properties still missing: multi-value grammars (`transition`, `flex`,
-  `grid`, `box-shadow`), and angle, time, and resolution values. `border-radius`
-  is done, including the elliptical form (`Value::Elliptical`).
+- Long-tail properties still missing: typed grammars for `transition`, `flex`,
+  `grid`, `box-shadow`, and `transform` (they are pass-through text, decision 37),
+  and angle, time, and resolution values. `border-radius` is done, including the
+  elliptical form (`Value::Elliptical`).
 - Full resolve grew by roughly 35 to 60 percent in the runs here when the registry went from 50 to 80
   properties, because every element computes every registered property. The
   timings in this section were taken on a machine that varied between runs.

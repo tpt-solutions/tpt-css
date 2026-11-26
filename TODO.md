@@ -51,7 +51,7 @@ All decisions are recorded in DESIGN.md section 2.
 - [x] `syntax/component.rs`: component values, simple blocks `()` `[]` `{}`, functions
 - [x] `syntax/span.rs`: `Span { source, start, end }` on meaningful nodes (spec 10.3)
 - [x] Bounded input length and token count (spec 19.2)
-- [ ] Optional comment preservation for tooling
+- [x] Optional comment preservation for tooling. `ParseOptions::preserve_comments` keeps the source span of each comment in `ParsedStylesheet::comments`. Off by default (DESIGN.md decision 44).
 
 ### AST (spec 11)
 - [~] `ast/stylesheet.rs`, `ast/rule.rs`, `ast/declaration.rs`, `ast/selector.rs`, `ast/value.rs`. `value.rs` is not created: declarations keep their `ComponentValue`s directly.
@@ -127,7 +127,7 @@ All decisions are recorded in DESIGN.md section 2.
 - [x] Full Tier 1 selectors: attribute operators, `:first-child`, `:last-child`, `:only-child`, `:nth-*`, `:first-of-type` and related, `:empty`, `:not()`, `:is()`, `:where()`, `:lang()`, `:dir()`, form states. Tests: `tests/selectors/tier1.rs`.
 - [x] Sibling combinators `+` and `~`
 - [x] Pseudo-elements `::before`, `::after`, `::marker`, `::placeholder` (spec 12.5). Styles are side tables; `StyleMap::get_pseudo`.
-- [~] `content` property. Strings, `attr(name)` (plain name, mixed with strings), `normal`, and `none` are done. `attr()` reads the element's attribute at computed-value time, and a change to that attribute restyles the element. Missing attribute: empty string. Not done: the `attr(name type, fallback)` forms and counters. Tests: `tests/style/m1.rs`, `tests/integration/invalidation.rs`.
+- [~] `content` property. Strings, `attr(name)` (plain name, mixed with strings), `normal`, and `none` are done. `attr()` reads the element's attribute at computed-value time, and a change to that attribute restyles the element. Missing attribute: empty string. `attr()` takes the `string` type and a string fallback (DESIGN.md decision 43). Other attribute types are not done. Counters are done in `content` (`counter()` and `counters()`, decision 38). Tests: `tests/style/m1.rs`, `tests/integration/invalidation.rs`, `tests/integration/counters.rs`.
 - [x] Custom properties with cascade (spec 13.7). Inherited; `initial` removes them.
 - [x] `var()` with fallbacks (spec 14.6)
 - [x] Custom property cycle detection and `max_var_depth` (spec 13.7, 19.2). A cycle makes its members invalid.
@@ -135,7 +135,7 @@ All decisions are recorded in DESIGN.md section 2.
 - [x] Media queries, `@media`, evaluation separate from matching (spec 16.3). Media type, `and`, `not`, lists, nesting, and the width, height, aspect-ratio, orientation, color-scheme, reduced-motion, hover, and pointer features.
 - [x] Remaining basic colors: `#rgba`, `#rrggbbaa`, `hsl()`, `hsla()`, `hwb()`, `lab()`, `lch()`, `oklab()`, `oklch()`, and `color-mix()` are done (spec 14.5). See section 6 for the open color items.
 - [~] Tier 0 and Tier 1 units (spec 14.3). Length units (px, em, rem, vw, vh, vmin, vmax, cm, mm, Q, in, pt, pc) and percent are done. Angle, time, and resolution units are accepted only for the hue of `hsl()`/`hwb()`.
-- [~] Shorthands: `margin`, `padding`, `border` (with sides, width, style, color), `background` (color only), `font` (style, weight, stretch, small-caps, size, line height, family; no system fonts), `list-style` (type, position, and `none` for the image), and `text-decoration` (line, style, color, thickness, skip-ink). `text-decoration-thickness` is a longhand (`auto`, `from-font`, or a non-negative length or percentage). `text-decoration-skip-ink` is `auto`, `all`, or `none`; the shorthand can name only `all`, because `none` is the line value and `auto` is the thickness. `font-stretch` is a longhand (the nine keywords, or a non-negative percentage) and is inherited. `font-variant-caps` is a longhand (the CSS Fonts 4 caps keywords). `font-variant` is a shorthand over that one longhand: `normal`, `none` (which means `normal` here), or a caps keyword. Its other sub-values (ligatures, numeric, east-asian, alternates, position, emoji) are not registered, so a declaration that names them is dropped. Not done: `background` with images, and those other `font-variant-*` longhands (spec 15.3). In the `font` shorthand, a percentage stretch is not accepted, because `font-size` also takes percentages and the two cannot be told apart.
+- [~] Shorthands: `margin`, `padding`, `border` (with sides, width, style, color), `background` (one image and one color, in any order, with `none` and `transparent` for the omitted ones; no layer lists, DESIGN.md decision 43), `font` (style, weight, stretch, small-caps, size, line height, family; no system fonts), `list-style` (type, position, and `none` for the image), and `text-decoration` (line, style, color, thickness, skip-ink). `text-decoration-thickness` is a longhand (`auto`, `from-font`, or a non-negative length or percentage). `text-decoration-skip-ink` is `auto`, `all`, or `none`; the shorthand can name only `all`, because `none` is the line value and `auto` is the thickness. `font-stretch` is a longhand (the nine keywords, or a non-negative percentage) and is inherited. `font-variant-caps` is a longhand (the CSS Fonts 4 caps keywords). `font-variant` is a shorthand over that one longhand: `normal`, `none` (which means `normal` here), or a caps keyword. Its other sub-values (ligatures, numeric, east-asian, alternates, position, emoji) are not registered, so a declaration that names them is dropped. Not done: `background` with images, and those other `font-variant-*` longhands (spec 15.3). In the `font` shorthand, a percentage stretch is not accepted, because `font-size` also takes percentages and the two cannot be told apart.
 - [~] M1 property set (spec 15.2). Added: `overflow`, `position`, `top`, `right`, `bottom`, `left`, `z-index`, `opacity`, `content`, `vertical-align`, `white-space`, `direction`, `unicode-bidi`, and the long-tail rows listed in section 6. Plus the M0 set and the shorthands above. Background images are not implemented.
 - [~] Invalidation foundation (spec 17). Attribute, state, and inline changes restyle the subtree. Sibling-sensitive rules restyle the parent's subtree. Stylesheet and tree changes restyle everything. There is no dependency index yet (M3). Tests: `tests/integration/invalidation.rs`.
 - [x] Fixtures: selector, cascade, var, calc. Tests in `tests/selectors`, `tests/style/m1.rs`, `tests/cascade/media.rs`. Own fixture: `fixtures/mit/web-like.css`.
@@ -181,12 +181,12 @@ All decisions are recorded in DESIGN.md section 2.
 - [x] `getComputedStyle` support contract (`ComputedStyle::property_values`).
 - [x] Devtools-facing inspection data (spec 7 `diagnostics`), via `StyleResolver::inspect`.
 - [x] Visited-link privacy policy: `VisitedPolicy` (spec 20.2).
-- [~] Web profile integration tests (`--features web`). The `web` feature enables the CSSOM tests. There is no DOM adapter, so no end-to-end web test exists.
+- [x] Web profile integration tests (`--features web`). The `web` feature enables the CSSOM tests and `tests/integration/web_markup.rs`, an end-to-end test from markup (with `<style>` sheets) to computed styles. The markup reader is test support, not an engine parser (DESIGN.md decision 39).
 - [~] Acceptance: incremental restyle, no full-document restyle for simple local changes. Met for subject-only rules: a local change restyles one element (`tests/integration/perf.rs`, `tests/integration/invalidation.rs`). A one-element restyle on 10,000 elements takes about 34 µs (measured, release). `resolve` and `restyle` both return a reference, so no call copies the map. Callers that keep a result clone it.
 
 ## 6. M4: long-tail web compatibility (spec 24)
 
-- [~] Long-tail selectors (spec 12.2 Tier 3). The state pseudo-classes are done: `:current`, `:past`, `:future`, `:defined`, `:local-link`, `:playing`, `:paused`, `:fullscreen`, `:autofill`. They match the state bits that the host sets, so `:defined` matches nothing until the host reports it. Not done: the functional forms (`:current(selector)`, `:past(selector)`, `:future(selector)`), `:dir()` edge cases, and the media-state pseudos beyond `:playing` and `:paused` (`tests/style/m3.rs`).
+- [~] Long-tail selectors (spec 12.2 Tier 3). The state pseudo-classes are done: `:current`, `:past`, `:future`, `:defined`, `:local-link`, `:playing`, `:paused`, `:fullscreen`, `:autofill`. They match the state bits that the host sets, so `:defined` matches nothing until the host reports it. The functional forms `:current(selector)`, `:past(selector)`, and `:future(selector)` are done (`SimpleSelector::TimeState`, DESIGN.md decision 45). Not done: `:dir()` edge cases, and the media-state pseudos beyond `:playing` and `:paused` (`tests/style/m3.rs`).
 - [~] Long-tail properties and advanced values (spec 15.2). Added as registry rows, with keyword or length grammars: `cursor`, `pointer-events`, `user-select`, `appearance`, `resize`, `outline-style`, `text-transform`, `text-indent`, `overflow-wrap`, `word-break`, `hyphens`, `text-rendering`, `text-overflow`, `float`, `clear`, `object-fit`, `image-rendering`, `mix-blend-mode`, `isolation`, `backface-visibility`, `scroll-behavior`, `overscroll-behavior`, `list-style-type`, `list-style-position`, `list-style-image` (`none` only), `text-decoration-line`, `text-decoration-style`, `text-decoration-color`, `letter-spacing`, `word-spacing`, and `border-radius` with its four corner longhands, including the elliptical form (`a b` on a corner, `/` in the shorthand). An elliptical corner is `Value::Elliptical`; a circular one stays a plain length or percentage. Not done: the properties that take several values in a grammar this engine does not have (`transition`, `flex`, `grid`, `box-shadow`), and angle, time, and resolution values (`transform`, `animation-duration`).
 - [~] Advanced colors and media features (spec 14.5, 16.3). Full named color set (148), `lab()`, `lch()`, `oklab()`, `oklch()`, `color()` (srgb), and `color-mix()` in `srgb`, `srgb-linear`, `xyz`, `xyz-d50`, `hsl`, `hwb`, `lab`, `lch`, `oklab`, and `oklch`, with premultiplied alpha and the `shorter` and `longer` hue methods. Relative color syntax for seven functions. Media features `resolution`, `update`, `dynamic-range`, and `prefers-contrast` are done. `xyz`, `xyz-d65`, and `xyz-d50` are done in `color()` and `color-mix()`. Not done: the other hue methods (`increasing`, `decreasing`), and `color-mix()` in `display-p3` and other wide-gamut spaces.
 - [~] Shadow DOM edge cases (spec 9.3). Shadow roots are styled as the host's flat-tree children, document selectors do not match inside a shadow tree, and slotted elements inherit from their slot. Not done: `::highlight()` inside shadow trees is not checked, shadow DOM event retargeting (not a style concern), and the engine does not build shadow trees; the host supplies them through the tree contract.
@@ -218,7 +218,7 @@ All decisions are recorded in DESIGN.md section 2.
 Source: a review of the repo for bugs, gaps, usability, adoption, and automation. The review found no failing tests; `cargo test`, `cargo fmt --check`, and `cargo clippy -D warnings` pass on the default features.
 
 ### Docs and correctness
-- [ ] Commit or revert the uncommitted `ci.yml` changes: the fuzz install step (`taiki-e/install-action@v2`), the clippy matrix, the `doc` job, and `advisories` in the `deny` job. Left for the owner to decide.
+- [x] Commit or revert the uncommitted `ci.yml` changes: the fuzz install step (`taiki-e/install-action@v2`), the clippy matrix, the `doc` job, and `advisories` in the `deny` job. Committed in 40ce7a5, so nothing is uncommitted now.
 - [x] Fix stale claims about deny and fuzz CI in sections 0 and 7.
 - [x] README example is accurate. Its snippet is marked `rust,ignore` and points to `examples/minimal.rs`, a complete program that `tests/examples.rs` checks.
 - [x] `cargo doc --no-deps` with `-D warnings` passes on all three feature sets. Three broken links were fixed: two public docs linked to private items, and one used a path that did not resolve.
@@ -230,7 +230,7 @@ Source: a review of the repo for bugs, gaps, usability, adoption, and automation
 - [x] `examples/dark_mode.rs`: custom properties switched by `prefers-color-scheme`. Checked by `tests/examples.rs`.
 - [x] `examples/diagnostics.rs`: prints each parse diagnostic with its severity and position. Checked by `tests/examples.rs`.
 - [x] `examples/cssom_edit.rs` (feature `cssom`): CSSOM insert and set_property, serialized. Checked by `tests/examples.rs` under `--features cssom`.
-- [ ] `examples/media_and_container.rs`: media queries and container sizes.
+- [x] `examples/media_and_container.rs`: media queries and container sizes. Checked by `tests/examples.rs`.
 - [x] `examples/common/mod.rs`: the shared arena tree for the examples. Loaded once by `tests/examples.rs` so clippy accepts it.
 - [x] Starter adapter template in `templates/adapter/`: a node store implementing `StyleTree`, with a test. It is a separate package that depends on the engine by path. Its test passes locally.
 - [x] `CONTRIBUTING.md`: contributions are through issues only. Covers the issue templates, the clean-room rule, and the build commands.
@@ -244,19 +244,18 @@ Source: a review of the repo for bugs, gaps, usability, adoption, and automation
 - [x] CI: `clippy` job across the feature matrix (default, `--no-default-features`, `--features web`). Checked locally; not yet run on a runner.
 - [x] `cargo deny check advisories` added to the `deny` job. Passes locally.
 - [x] Dependabot for GitHub Actions and the `fuzz/` crate (`.github/dependabot.yml`). Not yet run on GitHub.
-- [ ] A script that turns unchecked TODO items into "good first issue" issues. Not started: it would create issues on GitHub, so it should run only with the owner's go-ahead.
 - [x] Pre-commit hook (`.githooks/pre-commit`) for `cargo fmt --check` and clippy. Enabled with `git config core.hooksPath .githooks`. Run once locally; the hook file's executable bit is not set on Windows.
 
 ### Innovative
-- [ ] `tpt-css` CLI: `check` prints diagnostics for a stylesheet; `compute` prints computed styles for a JSON fixture tree.
-- [ ] WASM playground: CSS in, computed styles, diagnostics, and `Inspection` out, on a static page.
-- [ ] Generated support table from `properties/registry.rs` and the test names, published from CI. Replaces hand-kept coverage claims.
-- [ ] Computed-style snapshots for the fixtures, with a diff printed in CI when they change.
+- [x] `tpt-css` CLI: `check` prints diagnostics for a stylesheet; `compute` prints computed styles for a JSON fixture tree. Built as `src/bin/tpt-css` with no dependencies (DESIGN.md decision 40, `docs/CLI.md`). Tests: `tests/cli.rs`.
+- [x] WASM playground: CSS in, diagnostics and computed styles out, on a static page (`playground/`, DESIGN.md decision 40). Not `Inspection` yet. The module is built for `wasm32-unknown-unknown` in CI, and its exports were smoke-tested in Node. The page itself was not opened in a browser.
+- [x] Generated support table from `properties/registry.rs`, in `docs/SUPPORT.md` (DESIGN.md decision 42). CI fails when it is stale. Not done: test names in the table, and publishing it from CI.
+- [x] Computed-style snapshots for the fixtures, with a diff printed in CI when they change (`fixtures/snapshots/`, DESIGN.md decision 41).
 
 ### Usability findings
-- [ ] A misspelled property name (for example `colr: blue`) is dropped with no diagnostic. The parser reports invalid values but not unknown property names. Decide whether unknown names should warn (a diagnostic code is needed) or stay silent as the spec requires for forward compatibility, then add the warning or record the decision in DESIGN.md.
+- [x] A misspelled property name (for example `colr: blue`) is dropped with no diagnostic. Decided (DESIGN.md decision 36): an `info` diagnostic with code `UnknownProperty` is reported, and the cascade still drops the declaration. Checked by `tests/examples.rs`.
 
 ### Missing features that block real pages
-- [ ] Parse `box-shadow`, `transform`, `transition`, `flex`, and `grid` as pass-through values, so a layout engine downstream can read them. Layout itself stays out of scope.
-- [ ] `background-image` and `content` counters (see section 3).
-- [ ] A DOM adapter, so the web profile has an end-to-end test (see section 5).
+- [x] Parse `box-shadow`, `transform`, `transition`, `flex`, and `grid` as pass-through values, so a layout engine downstream can read them. Layout itself stays out of scope. Done as `Grammar::PassThrough` (decision 37). Their grammars are not checked here.
+- [x] `background-image` and `content` counters (see section 3). `background-image` is a typed list of `none`, `url()`, and image functions, kept as text (decision 37). Counters are done (decision 38). Not done: images are not loaded, `list-item` is done (decision 43), and `counter-set`/`counter-reset` on `::marker` are not special-cased.
+- [x] A DOM adapter, so the web profile has an end-to-end test (see section 5). Decided (DESIGN.md decision 39): no HTML parser in the engine. The adapter is `TestTree` (tests/common) fed by a small markup reader (tests/common/markup.rs), which gives the end-to-end test. A product DOM adapter waits for the `tpt-dom`/`tpt-html` crates.

@@ -18,7 +18,10 @@ detailed checklist is in [TODO.md](../TODO.md). Spec-by-spec traceability is in
 | Incremental restyle | Done for local changes; some invalidation is conservative |
 | Long-tail properties | Partly done (see TODO.md section 6) |
 | Layout, painting, JavaScript, DOM | Out of scope for this crate |
-| DOM adapter | Not built |
+| DOM adapter | Test-only: an in-memory tree and a small markup reader under `tests/common`. No product adapter |
+| Command line | `tpt-css check` and `tpt-css compute` (`docs/CLI.md`) |
+| WASM playground | Static page and module in `playground/`. Not opened in a browser here |
+| Support table | Generated in `docs/SUPPORT.md`, checked by a test |
 
 ## Milestones
 
@@ -40,6 +43,6 @@ The engine was built in milestones named after the specification
 - Pass-through values for `box-shadow`, `transform`, `transition`, `flex`, and
   `grid` are not parsed.
 - A misspelled property name produces no diagnostic. It is ignored silently.
-- No DOM adapter exists, so there is no end-to-end web test.
+- The only DOM adapter is test support. The end-to-end web test (`--features web`) reads a small markup subset, not full HTML.
 - The fuzz targets run in CI on Linux, but the job has not been confirmed green
   on a runner.
