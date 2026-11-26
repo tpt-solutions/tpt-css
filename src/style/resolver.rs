@@ -155,7 +155,7 @@ pub(crate) struct LoadedSheet {
 }
 
 /// The winning declaration for one property or custom property, with its key.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Winner {
     pub value: SpecifiedValue,
     pub key: CascadeKey,
@@ -511,9 +511,9 @@ impl StyleResolver {
             sheet.rules.iter().any(|rule| {
                 rule.decls.iter().any(|decl| match &decl.target {
                     DeclTarget::Prop(id) if *id == ids::CONTENT => match &decl.value {
-                        SpecifiedValue::Value(Value::Content(items)) => items
-                            .iter()
-                            .any(|i| matches!(i, ContentItem::Attr { .. })),
+                        SpecifiedValue::Value(Value::Content(items)) => {
+                            items.iter().any(|i| matches!(i, ContentItem::Attr { .. }))
+                        }
                         SpecifiedValue::Unparsed { .. } => true,
                         _ => false,
                     },
@@ -978,9 +978,8 @@ pub(crate) fn style_tree<T: StyleTree>(
                 // Sharing key: siblings have the same tree parent, so the same parent style
                 // (checked by identity of the entry list). A slotted element inherits from its
                 // slot, so it is never shared.
-                let shareable = may_share
-                    && targets.is_empty()
-                    && tree.assigned_slot(frame.node).is_none();
+                let shareable =
+                    may_share && targets.is_empty() && tree.assigned_slot(frame.node).is_none();
                 let parent_key = tree.parent(frame.node);
                 let attrs_here = tree.attributes(frame.node);
                 let hit = if shareable {
@@ -990,7 +989,10 @@ pub(crate) fn style_tree<T: StyleTree>(
                             .find(|e| {
                                 e.cas == element_cas
                                     && e.container == container
-                                    && e.attrs.as_ref().is_none_or(|a| a == attrs_here)
+                                    && match &e.attrs {
+                                        Some(a) => a == attrs_here,
+                                        None => true,
+                                    }
                             })
                             .map(|e| e.style.clone())
                     })
