@@ -1087,6 +1087,42 @@ fn font_stretch_keywords_percentages_and_the_font_shorthand() {
 }
 
 #[test]
+fn font_variant_caps_longhand_and_font_variant_shorthand() {
+    let caps = |css: &str| longhands_of(css, &["font-variant-caps"])[0].clone();
+    assert_eq!(
+        caps("child { font-variant-caps: small-caps }"),
+        Value::Keyword("small-caps")
+    );
+    assert_eq!(
+        caps("child { font-variant-caps: titling-caps }"),
+        Value::Keyword("titling-caps")
+    );
+    // The shorthand takes a caps keyword, and `none` means `normal`.
+    assert_eq!(
+        caps("child { font-variant: all-small-caps }"),
+        Value::Keyword("all-small-caps")
+    );
+    assert_eq!(
+        caps("child { font-variant-caps: unicase; font-variant: none }"),
+        Value::Keyword("normal")
+    );
+    // A sub-value this engine does not have (ligatures) makes the shorthand invalid.
+    assert_eq!(
+        caps("child { font-variant-caps: unicase; font-variant: common-ligatures }"),
+        Value::Keyword("unicase")
+    );
+    // The font shorthand takes small-caps and resets caps otherwise.
+    assert_eq!(
+        caps("child { font: small-caps 12px serif }"),
+        Value::Keyword("small-caps")
+    );
+    assert_eq!(
+        caps("child { font-variant-caps: petite-caps; font: 12px serif }"),
+        Value::Keyword("normal")
+    );
+}
+
+#[test]
 fn text_decoration_skip_ink_longhand_and_shorthand() {
     let ink = |css: &str| longhands_of(css, &["text-decoration-skip-ink"])[0].clone();
     assert_eq!(
