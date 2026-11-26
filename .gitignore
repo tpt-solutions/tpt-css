@@ -1,0 +1,25 @@
+# Rust build output
+target/
+
+# Library crate: Cargo.lock is not committed
+Cargo.lock
+
+# Backup and temporary files
+*.rs.bk
+*.tmp
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Fuzzing corpus and artifacts (generated)
+fuzz/artifacts/
+fuzz/corpus/
+
+# Local environment and secrets
+.env
+.env.*
+*.pem
+*.key

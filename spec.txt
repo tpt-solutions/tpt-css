@@ -1,0 +1,2439 @@
+# tpt-css Design Specification
+
+**Status:** Draft 0.1
+**License:** MIT OR Apache-2.0 (dual, at the user's option)
+**Implementation language:** Rust
+**Core dependency policy:** zero third-party crates in the CSS core
+**Provenance policy:** clean-room, spec-first; no porting or wrapping existing CSS engines
+**Target modes:** AppFront-native and Web/DOM-compatible through adapters
+
+---
+
+## 1. Purpose
+
+`tpt-css` is a new, clean-room CSS engine written in Rust.
+
+It is responsible for:
+
+```text
+CSS text
+  -> tokens
+  -> stylesheet AST
+  -> selector matching
+  -> cascade
+  -> specified values
+  -> variable substitution
+  -> property parsing
+  -> computed styles
+```
+
+It is **not** responsible for layout, paint, HTML parsing, DOM implementation, JavaScript, networking, font loading, or animation timing.
+
+The engine must be usable by both:
+
+1. **AppFront-native documents**, where AppFront provides the tree and state model.
+2. **Web documents**, where a future `tpt-dom` adapter provides DOM semantics.
+
+The CSS core must not depend on either frontend.
+
+---
+
+## 2. Goals
+
+### 2.1 Primary goals
+
+1. **Clean-room implementation**
+   - Implement from public CSS specifications.
+   - Do not port, wrap, translate, or copy code from LibWeb, Servo, Blink, Gecko, WebKit, or other engines.
+   - Do not depend on `cssparser`, `selectors`, `stylo`, `lightningcss`, or similar existing CSS implementation crates.
+
+2. **Strict license purity**
+   - All first-party code is dual licensed `MIT OR Apache-2.0`, copyright TPT Solutions.
+   - The core crate has no third-party dependencies.
+   - Optional integration crates may only depend on approved tpt crates usable under MIT.
+   - No MPL, GPL, LGPL, Apache-only, or proprietary dependencies or code in the engine.
+   - Any allowed dependency must offer MIT as a license option (`MIT` or `MIT OR Apache-2.0`).
+
+3. **Pure Rust**
+   - No C/C++ CSS engine dependency.
+   - No FFI in the core.
+   - Core should compile as `no_std + alloc` where practical.
+
+4. **Document-agnostic**
+   - The engine styles an abstract tree.
+   - AppFront and DOM are adapters, not core assumptions.
+
+5. **Spec-traceable**
+   - Every major algorithm should cite the relevant spec section.
+   - Every supported property/selector/cascade behavior should have tests.
+   - The engine should maintain a spec-to-test traceability matrix.
+
+6. **Deterministic**
+   - Cascade order must be stable.
+   - Serialization must be deterministic.
+   - No random hash iteration may affect style resolution.
+
+7. **Safe against hostile CSS**
+   - Malformed CSS must not panic.
+   - Deep nesting, huge token streams, selector complexity, and variable cycles must be bounded.
+
+8. **Incremental**
+   - The engine must support invalidation and restyling without recomputing the entire document for every change.
+
+---
+
+## 3. Non-goals
+
+`tpt-css` does not implement:
+
+- HTML parsing.
+- DOM node semantics.
+- DOM events.
+- JavaScript bindings.
+- Layout.
+- Paint.
+- Compositing.
+- Font loading.
+- Image decoding.
+- Network fetching.
+- `@import` fetching.
+- Animation timing drivers.
+- Transition timing drivers.
+- Used-value layout resolution.
+- Browser UI.
+- Devtools UI.
+
+It may provide metadata needed by those systems, but it does not own them.
+
+---
+
+## 4. Design principles
+
+### 4.1 Spec-first, not engine-first
+
+Implementation order:
+
+```text
+spec section
+  -> own algorithm description
+  -> own Rust implementation
+  -> own MIT tests
+  -> external conformance oracle
+```
+
+Do not read another engine's implementation to decide how to implement a feature.
+
+External test suites may be used as black-box oracles, but if strict MIT-only distribution is required, their source/assets must not be vendored into the MIT tree unless explicitly approved.
+
+### 4.2 Separate syntax, semantics, and style resolution
+
+The engine must keep these layers distinct:
+
+```text
+syntax      -> tokens and component values
+parse       -> rules, declarations, selectors
+selectors   -> matching and specificity
+cascade     -> precedence and declaration selection
+values      -> grammar parsing and computation
+properties  -> property metadata
+style       -> tree resolution, inheritance, invalidation
+cssom       -> optional web-facing mutation APIs
+```
+
+### 4.3 No DOM leakage
+
+The core must not contain HTML-specific assumptions such as:
+
+- `div`
+- `span`
+- `href`
+- `checked`
+- `disabled`
+- HTML case-insensitivity rules
+
+unless those are supplied through the tree adapter or a web-specific profile.
+
+The core may understand generic concepts:
+
+- element name
+- namespace
+- attributes
+- states
+- parent/child/sibling relationships
+- scope boundaries
+- shadow boundaries
+- inline style
+- pseudo-elements
+
+### 4.4 Computed style is not layout
+
+`tpt-css` produces computed styles.
+
+Layout-dependent values may remain unresolved or partially resolved until the layout engine consumes them.
+
+Examples:
+
+```text
+width: 50%
+height: auto
+margin: auto
+flex-basis: auto
+grid-template-columns: 1fr 2fr
+```
+
+The CSS engine should not pretend to know used layout values unless the relevant context is explicitly provided.
+
+---
+
+## 5. Target profiles
+
+### 5.1 AppFront profile
+
+The AppFront profile is the first practical target.
+
+```text
+AppFront tree
+  -> StyleTree adapter
+  -> tpt-css
+  -> computed styles
+  -> tpt-layout
+  -> tpt-paint
+```
+
+AppFront may provide:
+
+- native component tree
+- reactive state changes
+- component scopes
+- custom states
+- direct Rust APIs
+- optional JS/WASM scripting through tpt runtimes
+
+The CSS engine must still be tested against web-oriented selector and cascade behavior so AppFront shortcuts do not corrupt the core.
+
+### 5.2 Web profile
+
+The Web profile is the long-term compatibility target.
+
+```text
+HTML
+  -> tpt-dom
+  -> StyleTree adapter
+  -> tpt-css
+  -> computed styles
+  -> tpt-layout
+  -> tpt-paint
+```
+
+The Web profile requires:
+
+- DOM adapter
+- HTML UA stylesheet
+- CSSOM APIs
+- web state semantics
+- shadow DOM semantics
+- visited-link privacy behavior
+- web-compatible serialization
+- web-compatible error recovery
+
+The CSS core should remain the same.
+
+---
+
+## 6. Repository layout
+
+Start as one crate with strong module boundaries. Extract crates later only when APIs stabilize.
+
+```text
+tpt-css/
+├── Cargo.toml
+├── LICENSE-MIT
+├── LICENSE-APACHE
+├── NOTICE
+├── README.md
+├── DESIGN.md
+├── SPEC_TRACE.md
+├── CLEAN_ROOM.md
+├── deny.toml
+├── src/
+│   ├── lib.rs
+│   ├── syntax/
+│   │   ├── mod.rs
+│   │   ├── token.rs
+│   │   ├── tokenizer.rs
+│   │   ├── component.rs
+│   │   └── span.rs
+│   ├── parse/
+│   │   ├── mod.rs
+│   │   ├── stylesheet.rs
+│   │   ├── rules.rs
+│   │   ├── declarations.rs
+│   │   ├── selectors.rs
+│   │   └── diagnostics.rs
+│   ├── ast/
+│   │   ├── mod.rs
+│   │   ├── stylesheet.rs
+│   │   ├── rule.rs
+│   │   ├── declaration.rs
+│   │   ├── selector.rs
+│   │   └── value.rs
+│   ├── tree/
+│   │   ├── mod.rs
+│   │   ├── node.rs
+│   │   ├── attributes.rs
+│   │   ├── state.rs
+│   │   ├── scope.rs
+│   │   └── contract.rs
+│   ├── selectors/
+│   │   ├── mod.rs
+│   │   ├── specificity.rs
+│   │   ├── matching.rs
+│   │   ├── pseudo.rs
+│   │   ├── nth.rs
+│   │   └── invalidation.rs
+│   ├── cascade/
+│   │   ├── mod.rs
+│   │   ├── origin.rs
+│   │   ├── layer.rs
+│   │   ├── scope.rs
+│   │   ├── specificity.rs
+│   │   ├── order.rs
+│   │   └── collect.rs
+│   ├── values/
+│   │   ├── mod.rs
+│   │   ├── number.rs
+│   │   ├── length.rs
+│   │   ├── color.rs
+│   │   ├── calc.rs
+│   │   ├── var.rs
+│   │   ├── env.rs
+│   │   ├── attr.rs
+│   │   ├── image.rs
+│   │   └── serialize.rs
+│   ├── properties/
+│   │   ├── mod.rs
+│   │   ├── registry.rs
+│   │   ├── shorthand.rs
+│   │   ├── aliases.rs
+│   │   ├── computed.rs
+│   │   └── data/
+│   ├── style/
+│   │   ├── mod.rs
+│   │   ├── resolver.rs
+│   │   ├── computed.rs
+│   │   ├── inheritance.rs
+│   │   ├── custom.rs
+│   │   ├── sharing.rs
+│   │   └── invalidation.rs
+│   ├── cssom/
+│   │   ├── mod.rs
+│   │   ├── stylesheet.rs
+│   │   ├── rule.rs
+│   │   ├── declaration.rs
+│   │   └── mutation.rs
+│   ├── env/
+│   │   ├── mod.rs
+│   │   ├── media.rs
+│   │   ├── container.rs
+│   │   ├── font.rs
+│   │   └── url.rs
+│   └── limits.rs
+├── tests/
+│   ├── syntax/
+│   ├── parse/
+│   ├── selectors/
+│   ├── cascade/
+│   ├── values/
+│   ├── properties/
+│   ├── style/
+│   └── integration/
+├── fixtures/
+│   ├── mit/
+│   └── golden/
+├── fuzz/
+│   ├── tokenizer/
+│   ├── parser/
+│   ├── selector_parser/
+│   └── var_substitution/
+└── tools/
+    ├── spec_trace/
+    ├── conformance/
+    └── license_audit/
+```
+
+Future crate extraction may produce:
+
+```text
+tpt-css-syntax
+tpt-css-selectors
+tpt-css-cascade
+tpt-css-values
+tpt-css-properties
+tpt-css-style
+tpt-cssom
+tpt-css
+```
+
+But the first implementation should avoid premature workspace fragmentation.
+
+---
+
+## 7. Feature flags
+
+```toml
+[features]
+default = ["appfront"]
+
+# Core profile targets
+appfront = []
+web = ["cssom"]
+
+# Optional API surfaces
+cssom = []
+serialize = []
+diagnostics = []
+
+# Environment integrations
+std = []
+font-metrics = []
+container-queries = []
+url-resolver = []
+
+# Advanced CSS
+layers = []
+scope = []
+nesting = []
+container = []
+property-registry = []
+animations-cascade = []
+
+# Development
+trace-spec = []
+fuel = []
+```
+
+The core must remain usable without `std`.
+
+`appfront` and `web` should not fork the cascade or selector engine. They may enable different adapters, UA styles, and API surfaces.
+
+---
+
+## 8. Public API sketch
+
+### 8.1 Parsing
+
+```rust
+pub struct ParseOptions {
+    pub origin: Origin,
+    pub quirks: QuirksMode,
+    pub limits: ParseLimits,
+    pub preserve_spans: bool,
+    pub preserve_comments: bool,
+}
+
+pub struct ParsedStylesheet {
+    pub stylesheet: Stylesheet,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+pub fn parse_stylesheet(
+    input: &str,
+    options: ParseOptions,
+) -> ParsedStylesheet;
+```
+
+CSS parsing must use spec-defined error recovery. Invalid declarations should not abort the whole stylesheet.
+
+Diagnostics are optional for embedders that only want style resolution.
+
+### 8.2 Style resolution
+
+```rust
+pub struct StyleResolver {
+    // caches, arenas, selector dependency graph, custom property graph
+}
+
+impl StyleResolver {
+    pub fn new(config: ResolverConfig) -> Self;
+
+    pub fn add_stylesheet(
+        &mut self,
+        sheet: Stylesheet,
+        origin: Origin,
+    ) -> SheetId;
+
+    pub fn remove_stylesheet(
+        &mut self,
+        id: SheetId,
+    );
+
+    pub fn resolve<T: StyleTree>(
+        &mut self,
+        tree: &T,
+        env: &Environment,
+    ) -> StyleMap;
+
+    pub fn invalidate<T: StyleTree>(
+        &mut self,
+        tree: &T,
+        change: StyleChange,
+    );
+
+    pub fn restyle<T: StyleTree>(
+        &mut self,
+        tree: &T,
+        env: &Environment,
+    ) -> StyleMap;
+}
+```
+
+### 8.3 Computed styles
+
+```rust
+pub struct StyleMap {
+    // node -> computed style
+    // pseudo-element -> computed style
+    // custom property maps
+}
+
+impl StyleMap {
+    pub fn get(&self, node: NodeId) -> Option<&ComputedStyle>;
+
+    pub fn get_pseudo(
+        &self,
+        node: NodeId,
+        pseudo: PseudoElement,
+    ) -> Option<&ComputedStyle>;
+
+    pub fn custom_property(
+        &self,
+        node: NodeId,
+        name: &str,
+    ) -> Option<&CustomPropertyValue>;
+}
+```
+
+`ComputedStyle` should expose typed property access:
+
+```rust
+impl ComputedStyle {
+    pub fn display(&self) -> Display;
+    pub fn color(&self) -> Color;
+    pub fn font_size(&self) -> Length;
+    pub fn raw(&self, property: PropertyId) -> Option<&ComputedValue>;
+}
+```
+
+The typed accessors are conveniences. The underlying storage should remain property-ID based.
+
+---
+
+## 9. Core tree contract
+
+The CSS engine must depend on a small abstract tree contract.
+
+```rust
+pub type NodeId = GenerationalId;
+
+pub trait StyleTree {
+    fn root(&self) -> NodeId;
+
+    fn parent(&self, node: NodeId) -> Option<NodeId>;
+    fn children(&self, node: NodeId) -> &[NodeId];
+
+    fn kind(&self, node: NodeId) -> NodeKind;
+
+    fn name(&self, node: NodeId) -> QualifiedName;
+    fn namespace(&self, node: NodeId) -> NamespaceId;
+
+    fn attributes(&self, node: NodeId) -> &Attributes;
+    fn state(&self, node: NodeId) -> ElementState;
+
+    fn inline_style(&self, node: NodeId) -> Option<&DeclarationBlock>;
+
+    fn scope(&self, node: NodeId) -> ScopeInfo;
+    fn shadow(&self, node: NodeId) -> ShadowInfo;
+
+    fn language(&self, node: NodeId) -> Option<&str>;
+    fn direction(&self, node: NodeId) -> Option<Direction>;
+}
+```
+
+The exact API may use iterators instead of slices if needed, but the contract must remain small.
+
+### 9.1 Node kind
+
+```rust
+pub enum NodeKind {
+    Element,
+    Text,
+    Comment,
+    Document,
+    Fragment,
+    Pseudo(PseudoElement),
+}
+```
+
+Only element-like nodes participate in selector matching.
+
+Pseudo-elements may be represented as generated style nodes.
+
+### 9.2 Element state
+
+```rust
+pub struct ElementState {
+    pub bits: StateBits,
+    pub custom: CustomStateSet,
+}
+```
+
+State bits should include, eventually:
+
+```text
+hover
+active
+focus
+focus-visible
+focus-within
+visited
+link
+any-link
+checked
+disabled
+enabled
+required
+optional
+valid
+invalid
+user-valid
+user-invalid
+in-range
+out-of-range
+read-only
+read-write
+placeholder-shown
+default
+indeterminate
+target
+open
+closed
+modal
+popover-open
+```
+
+AppFront may map native component states into this model.
+
+The CSS core must not know whether a state came from HTML, AppFront, or another host.
+
+### 9.3 Scope and shadow information
+
+```rust
+pub struct ScopeInfo {
+    pub scope_root: Option<NodeId>,
+    pub lower_bound: Option<NodeId>,
+    pub upper_bound: Option<NodeId>,
+}
+
+pub struct ShadowInfo {
+    pub host: Option<NodeId>,
+    pub shadow_root: Option<NodeId>,
+    pub slot_assignment: Option<SlotAssignment>,
+    pub part_names: PartNameSet,
+    pub exportparts: ExportPartsMap,
+}
+```
+
+These are required for:
+
+- `@scope`
+- `:scope`
+- `:host`
+- `:host-context`
+- `::slotted`
+- `::part`
+- shadow-aware cascade behavior
+
+AppFront may use a simpler component-scope model, but it must map into the same contract.
+
+---
+
+## 10. Syntax layer
+
+### 10.1 Tokenizer
+
+Implement CSS Syntax Level 3 tokenization.
+
+Token kinds must include:
+
+```text
+ident
+function
+at-keyword
+hash
+string
+bad-string
+url
+bad-url
+delim
+number
+percentage
+dimension
+whitespace
+CDO
+CDC
+colon
+semicolon
+comma
+left-square
+right-square
+left-paren
+right-paren
+left-curly
+right-curly
+EOF
+```
+
+The tokenizer must:
+
+- handle Unicode input correctly
+- handle escapes
+- handle newline normalization
+- handle bad strings and bad URLs
+- preserve source spans
+- avoid panics on malformed input
+- support bounded input length
+- support optional comment preservation for tooling
+
+Comments are ignored by default for style resolution.
+
+### 10.2 Component values
+
+Implement component value parsing:
+
+```text
+component value
+  -> preserved token
+  -> function
+  -> simple block
+```
+
+Simple blocks:
+
+```text
+()
+[]
+{}
+```
+
+Component values are needed for:
+
+- declaration values
+- custom property values
+- `var()` fallbacks
+- unknown properties
+- `@supports`
+- `@media`
+- selector arguments
+- future property grammars
+
+The component value layer must not eagerly interpret every value as a known property.
+
+### 10.3 Source spans
+
+Every meaningful AST node should carry a span:
+
+```rust
+pub struct Span {
+    pub source: SourceId,
+    pub start: u32,
+    pub end: u32,
+}
+```
+
+Spans are required for:
+
+- diagnostics
+- CSSOM mutation
+- devtools integration
+- conformance debugging
+- spec traceability
+
+---
+
+## 11. AST
+
+### 11.1 Stylesheet
+
+```rust
+pub struct Stylesheet {
+    pub rules: Vec<Rule>,
+    pub namespaces: NamespaceMap,
+    pub layers: LayerOrder,
+    pub diagnostics: Vec<Diagnostic>,
+}
+```
+
+### 11.2 Rules
+
+```rust
+pub enum Rule {
+    Style(StyleRule),
+    Media(MediaRule),
+    Supports(SupportsRule),
+    Layer(LayerRule),
+    Container(ContainerRule),
+    Scope(ScopeRule),
+    Keyframes(KeyframesRule),
+    FontFace(FontFaceRule),
+    Page(PageRule),
+    Property(PropertyRule),
+    Import(ImportRule),
+    Namespace(NamespaceRule),
+    Unknown(UnknownAtRule),
+}
+```
+
+Unsupported at-rules must be preserved as unknown at-rules where required by CSSOM/error recovery, but they must not affect style resolution unless supported.
+
+### 11.3 Style rule
+
+```rust
+pub struct StyleRule {
+    pub selectors: SelectorList,
+    pub declarations: DeclarationBlock,
+    pub span: Span,
+}
+```
+
+### 11.4 Declaration block
+
+```rust
+pub struct DeclarationBlock {
+    pub declarations: Vec<Declaration>,
+    pub span: Span,
+}
+
+pub struct Declaration {
+    pub property: PropertyName,
+    pub value: ComponentValueList,
+    pub important: bool,
+    pub span: Span,
+}
+```
+
+Custom properties are declarations whose names begin with `--`.
+
+Shorthands should remain recognizable for CSSOM serialization, but cascade operates on expanded longhands.
+
+---
+
+## 12. Selectors
+
+### 12.1 Selector AST
+
+```rust
+pub struct SelectorList {
+    pub selectors: Vec<ComplexSelector>,
+}
+
+pub struct ComplexSelector {
+    pub compounds: Vec<CompoundSelector>,
+    pub combinators: Vec<Combinator>,
+    pub pseudo_element: Option<PseudoElement>,
+    pub specificity: Specificity,
+}
+
+pub struct CompoundSelector {
+    pub simple: Vec<SimpleSelector>,
+}
+
+pub enum SimpleSelector {
+    Universal,
+    Type(QualifiedName),
+    Id(Atom),
+    Class(Atom),
+    Attribute(AttributeSelector),
+    PseudoClass(PseudoClass),
+    PseudoElement(PseudoElement),
+    Nesting,
+}
+```
+
+Combinators:
+
+```text
+descendant
+child
+next-sibling
+subsequent-sibling
+column
+```
+
+The column combinator may be deferred.
+
+### 12.2 Selector support tiers
+
+#### Tier 0: minimum viable selectors
+
+Required for M0:
+
+```text
+*
+type
+#id
+.class
+[attr]
+[attr=value]
+descendant
+child
+:root
+```
+
+State selectors may be supported if the tree adapter provides state:
+
+```text
+:hover
+:active
+:focus
+```
+
+#### Tier 1: practical selectors
+
+Required for M1:
+
+```text
+[attr~=value]
+[attr|=value]
+[attr^=value]
+[attr$=value]
+[attr*=value]
+:first-child
+:last-child
+:only-child
+:nth-child()
+:nth-last-child()
+:first-of-type
+:last-of-type
+:only-of-type
+:nth-of-type()
+:nth-last-of-type()
+:empty
+:not()
+:is()
+:where()
+:lang()
+:dir()
+:enabled
+:disabled
+:checked
+:required
+:optional
+:read-only
+:read-write
+:placeholder-shown
+::before
+::after
+::marker
+::placeholder
+```
+
+Sibling combinators:
+
+```text
++
+~
+```
+
+#### Tier 2: modern selectors
+
+Required for M2/M3:
+
+```text
+:has()
+:scope()
+:host
+:host-context()
+::slotted()
+::part()
+:state()
+:focus-visible
+:focus-within
+:target
+:any-link
+:link
+:visited
+:default
+:indeterminate
+:in-range
+:out-of-range
+:valid
+:invalid
+:user-valid
+:user-invalid
+:open
+:closed
+:modal
+:popover-open
+::selection
+::backdrop
+::file-selector-button
+```
+
+#### Tier 3: long-tail web selectors
+
+Later:
+
+```text
+:defined
+:local-link
+:current
+:past
+:future
+:playing
+:paused
+:seeking
+:buffering
+:stalled
+:muted
+:volume-locked
+:pictures-in-picture
+::highlight()
+::target-text
+::spelling-error
+::grammar-error
+::details-content
+::picker()
+::checkmark
+::scroll-marker
+::scroll-marker-group
+```
+
+### 12.3 Specificity
+
+Specificity must be represented explicitly:
+
+```rust
+pub struct Specificity {
+    pub a: u32,
+    pub b: u32,
+    pub c: u32,
+}
+```
+
+Rules:
+
+- ID selectors contribute to `a`.
+- Class, attribute, and pseudo-class selectors contribute to `b`.
+- Type and pseudo-element selectors contribute to `c`.
+- Universal selector contributes nothing.
+- `:where()` contributes nothing.
+- `:is()`, `:not()`, and `:has()` use the most specific argument.
+- `:nth-child(An+B of S)` includes the specificity of `S`.
+- Nesting selector specificity must follow the nesting spec.
+
+Specificity must be computed at parse time where possible.
+
+### 12.4 Matching strategy
+
+Default matching should be right-to-left.
+
+For each selector:
+
+```text
+match rightmost compound against candidate element
+walk combinators leftward
+validate ancestor/sibling/scope constraints
+return match result
+```
+
+Performance features:
+
+- candidate filtering by id/class/type
+- ancestor bloom filters
+- sibling caches
+- nth-child caches
+- selector dependency tracking
+- `:has()` invalidation graph
+
+Matching must be deterministic.
+
+### 12.5 Pseudo-elements
+
+Pseudo-elements should be modeled as generated style nodes.
+
+```rust
+pub enum PseudoElement {
+    Before,
+    After,
+    Marker,
+    Placeholder,
+    Selection,
+    Backdrop,
+    FileSelectorButton,
+    Part(Atom),
+    Slotted,
+    Highlight(Atom),
+    Unknown(Atom),
+}
+```
+
+The CSS engine computes pseudo-element styles.
+
+Layout/paint decide whether boxes are generated.
+
+`::before` and `::after` require `content` support before they become useful to layout.
+
+---
+
+## 13. Cascade
+
+### 13.1 Cascade inputs
+
+The cascade receives:
+
+```text
+matched declarations
+inline declarations
+UA declarations
+user declarations
+author declarations
+animation declarations
+transition declarations
+layer order
+scope information
+shadow context
+specificity
+source order
+importance
+```
+
+### 13.2 Origins
+
+```rust
+pub enum Origin {
+    UserAgent,
+    User,
+    Author,
+    Animation,
+    Transition,
+}
+```
+
+Importance is separate:
+
+```rust
+pub struct Importance(pub bool);
+```
+
+The cascade must implement the CSS Cascade origin/importance ordering exactly.
+
+High-level precedence:
+
+```text
+transitions
+important user-agent
+important user
+important author
+animations
+normal author
+normal user
+normal user-agent
+```
+
+The implementation must cite the cascade spec and be covered by golden tests.
+
+### 13.3 Cascade key
+
+Each matched declaration should produce a cascade key:
+
+```rust
+pub struct CascadeKey {
+    pub origin: Origin,
+    pub important: bool,
+    pub context: CascadeContext,
+    pub inline: bool,
+    pub layer: LayerOrder,
+    pub scope_proximity: ScopeProximity,
+    pub specificity: Specificity,
+    pub order: DeclarationOrder,
+}
+```
+
+The exact comparison order must follow the implemented cascade level.
+
+The engine should initially target Cascade 5 behavior, then add Cascade 6 scoping proximity when `@scope` is enabled.
+
+### 13.4 Layers
+
+Support:
+
+```css
+@layer reset, base, theme;
+
+@layer base {
+  p { margin: 0; }
+}
+
+@layer theme {
+  p { color: red; }
+}
+```
+
+Rules:
+
+- Layer order is established by first declaration.
+- Normal declarations in later layers win over earlier layers.
+- Normal unlayered declarations win over normal layered declarations.
+- Important declarations in earlier layers win over later layers.
+- Important layered declarations win over important unlayered declarations.
+
+This behavior must be tested heavily.
+
+### 13.5 Inline style
+
+Inline style from the tree adapter must enter the cascade according to the spec.
+
+The CSS engine must not treat inline style as a magical global override. It must participate in origin/importance/layer/specificity/order rules correctly.
+
+### 13.6 Shorthand expansion
+
+Shorthands must expand to longhands for cascade purposes.
+
+Example:
+
+```css
+margin: 1px 2px;
+```
+
+expands to:
+
+```text
+margin-top: 1px
+margin-right: 2px
+margin-bottom: 1px
+margin-left: 2px
+```
+
+The original shorthand should remain available for CSSOM serialization.
+
+Cascade precedence belongs to the expanded longhand declarations.
+
+### 13.7 Custom properties
+
+Custom properties cascade like ordinary properties, but their values are token streams until substitution.
+
+Algorithm:
+
+```text
+1. Cascade custom property declarations.
+2. Build var() dependency graph.
+3. Detect cycles.
+4. Mark cyclic custom properties invalid at computed-value time.
+5. Substitute var() references recursively.
+6. Use fallbacks when a custom property is invalid or missing.
+7. Parse resulting token streams against property grammars.
+8. Mark properties invalid at computed-value time when substitution fails.
+9. Compute registered custom properties according to @property.
+```
+
+Custom property names are case-sensitive.
+
+Ordinary property names are ASCII case-insensitive in the default profile.
+
+### 13.8 `initial`, `inherit`, `unset`, `revert`, `revert-layer`
+
+Support CSS-wide keywords:
+
+```text
+initial
+inherit
+unset
+revert
+revert-layer
+```
+
+Behavior must be property-aware:
+
+- inherited properties differ from non-inherited properties
+- `unset` depends on inheritance
+- `revert` depends on origin
+- `revert-layer` depends on layer order
+
+`all` must be supported as a shorthand-like CSS-wide property.
+
+---
+
+## 14. Values and units
+
+### 14.1 Value representation
+
+Parsed declaration values begin as component values.
+
+After variable substitution, property grammars produce typed specified values.
+
+```rust
+pub enum SpecifiedValue {
+    CssWideKeyword(CssWideKeyword),
+    Keyword(Atom),
+    Number(Number),
+    Dimension(Dimension),
+    Percentage(Percentage),
+    String(CssString),
+    Url(UrlValue),
+    Color(Color),
+    Calc(CalcNode),
+    Function(FunctionValue),
+    List(ValueList),
+    Custom(TokenStream),
+}
+```
+
+Computed values should be stored in a compact typed arena.
+
+### 14.2 Numeric model
+
+The engine needs a deterministic numeric model.
+
+Requirements:
+
+- preserve source numeric text for serialization where required
+- parse integers and numbers according to CSS Syntax
+- support scientific notation where allowed
+- support signed zero behavior where relevant
+- avoid nondeterministic rounding
+- define rounding rules for serialization
+- define calc simplification rules
+
+The initial implementation may use `f64` for computed numeric values, but the design must leave room for a more exact decimal/rational representation later.
+
+If `tpt-math` is used, it must be MIT-compatible and approved under the dependency policy.
+
+### 14.3 Units
+
+Tier 0:
+
+```text
+px
+em
+rem
+%
+```
+
+Tier 1:
+
+```text
+vw
+vh
+vmin
+vmax
+vi
+vb
+svw
+svh
+lvw
+lvh
+dvw
+dvh
+cm
+mm
+Q
+in
+pt
+pc
+deg
+grad
+rad
+turn
+s
+ms
+Hz
+kHz
+dpi
+dpcm
+dppx
+```
+
+Tier 2:
+
+```text
+ex
+ch
+cap
+ic
+lh
+rlh
+cq
+cqw
+cqh
+cqi
+cqb
+cqmin
+cqmax
+fr
+```
+
+Font-relative and container-relative units require environment providers.
+
+### 14.4 Calc
+
+Support:
+
+```text
+calc()
+min()
+max()
+clamp()
+```
+
+Later:
+
+```text
+round()
+mod()
+rem()
+sin()
+cos()
+tan()
+asin()
+acos()
+atan()
+atan2()
+pow()
+sqrt()
+hypot()
+log()
+exp()
+abs()
+sign()
+progress()
+```
+
+Calc must implement:
+
+- unit algebra
+- percentage handling
+- nested calc
+- simplification
+- serialization
+- invalid expression detection
+- division by zero handling
+- type checking
+
+Calc simplification must be deterministic.
+
+### 14.5 Colors
+
+Tier 0:
+
+```text
+named colors
+transparent
+#rgb
+#rrggbb
+rgb()
+rgba()
+```
+
+Tier 1:
+
+```text
+#rgba
+#rrggbbaa
+hsl()
+hsla()
+hwb()
+lab()
+lch()
+oklab()
+oklch()
+color-mix()
+```
+
+Tier 2:
+
+```text
+color()
+relative color syntax
+light-dark()
+system colors
+currentcolor resolution
+color interpolation metadata
+```
+
+Internal color representation should preserve color space:
+
+```rust
+pub struct Color {
+    pub space: ColorSpace,
+    pub components: [f32; 4],
+    pub alpha: Alpha,
+}
+```
+
+Serialization must follow the relevant color spec.
+
+### 14.6 `var()`, `env()`, `attr()`
+
+Support:
+
+```css
+var(--name)
+var(--name, fallback)
+env(safe-area-inset-top)
+attr(data-value)
+attr(data-value type(px))
+```
+
+`var()` is required early.
+
+`env()` requires an environment provider.
+
+`attr()` may be staged, but the AST must preserve enough information to support typed attr later.
+
+---
+
+## 15. Property registry
+
+### 15.1 Property metadata
+
+Every supported property must have a registry entry:
+
+```rust
+pub struct PropertySpec {
+    pub id: PropertyId,
+    pub name: &'static str,
+    pub inherited: bool,
+    pub initial: InitialValue,
+    pub animatable: AnimationKind,
+    pub parse: ParseFn,
+    pub compute: ComputeFn,
+    pub serialize: SerializeFn,
+    pub layout_effect: LayoutEffect,
+    pub spec_url: &'static str,
+}
+```
+
+The registry must be data-driven.
+
+Do not scatter property behavior through the cascade.
+
+### 15.2 Initial property set
+
+M0 should support at least:
+
+```text
+display
+visibility
+color
+background-color
+font-family
+font-size
+font-style
+font-weight
+line-height
+text-align
+width
+height
+min-width
+min-height
+max-width
+max-height
+margin-top
+margin-right
+margin-bottom
+margin-left
+padding-top
+padding-right
+padding-bottom
+padding-left
+border-top-width
+border-right-width
+border-bottom-width
+border-left-width
+border-top-color
+border-right-color
+border-bottom-color
+border-left-color
+border-top-style
+border-right-style
+border-bottom-style
+border-left-style
+box-sizing
+```
+
+M1 should add:
+
+```text
+background
+border
+margin
+padding
+font
+overflow
+position
+top
+right
+bottom
+left
+z-index
+opacity
+content
+list-style
+text-decoration
+vertical-align
+white-space
+direction
+unicode-bidi
+```
+
+M2/M3 should expand toward modern layout and visual CSS:
+
+```text
+flex-*
+grid-*
+gap
+align-*
+justify-*
+place-*
+transform
+filter
+backdrop-filter
+clip-path
+mask
+shadow
+outline
+transition-*
+animation-*
+container-*
+content-visibility
+contain
+aspect-ratio
+object-fit
+object-position
+```
+
+The registry may parse properties before layout supports them. Unsupported layout behavior should be reported through capability metadata, not silently ignored.
+
+### 15.3 Shorthands
+
+Shorthand metadata:
+
+```rust
+pub struct ShorthandSpec {
+    pub id: PropertyId,
+    pub name: &'static str,
+    pub longhands: &'static [PropertyId],
+    pub expand: ExpandFn,
+    pub serialize: SerializeShorthandFn,
+}
+```
+
+Shorthand expansion must be deterministic.
+
+Serialization should reconstruct shorthands only when safe.
+
+### 15.4 Aliases and vendor prefixes
+
+Aliases may be supported later:
+
+```text
+-webkit-*
+-moz-*
+-ms-*
+```
+
+Aliases must be explicit registry entries.
+
+Do not implement ad hoc string stripping in the cascade.
+
+---
+
+## 16. Style resolution
+
+### 16.1 Resolution pipeline
+
+For each element-like node:
+
+```text
+1. Collect matching rules.
+2. Collect inline declarations.
+3. Expand shorthands.
+4. Cascade longhand declarations.
+5. Cascade custom properties.
+6. Resolve custom property cycles.
+7. Substitute var() into longhand values.
+8. Parse property grammars.
+9. Apply CSS-wide keywords.
+10. Compute values.
+11. Inherit inherited properties.
+12. Compute pseudo-element styles.
+13. Store computed style.
+14. Record invalidation dependencies.
+```
+
+Font-size computation must be ordered carefully because many relative values depend on it.
+
+### 16.2 Environment
+
+```rust
+pub struct Environment {
+    pub viewport: ViewportInfo,
+    pub root_font: FontContext,
+    pub media: MediaQueryEnvironment,
+    pub containers: ContainerQueryContext,
+    pub fonts: FontMetricsProvider,
+    pub urls: UrlResolver,
+    pub preferences: UserPreferences,
+    pub env_variables: EnvVariables,
+}
+```
+
+Not all providers are required in M0.
+
+The engine must have sensible fallbacks or explicit unsupported diagnostics when a provider is missing.
+
+### 16.3 Media queries
+
+Support:
+
+```text
+@media
+screen
+print
+all
+min-width
+max-width
+width
+min-height
+max-height
+height
+orientation
+aspect-ratio
+resolution
+hover
+pointer
+any-hover
+any-pointer
+prefers-color-scheme
+prefers-reduced-motion
+prefers-contrast
+prefers-reduced-transparency
+update
+overflow-block
+overflow-inline
+display-mode
+dynamic-range
+video-dynamic-range
+```
+
+Media query evaluation must be separate from selector matching.
+
+Media query changes should invalidate affected rules, not necessarily the entire tree.
+
+### 16.4 Supports queries
+
+Support:
+
+```css
+@supports (display: grid) { ... }
+@supports not (...) { ... }
+@supports selector(:has(a)) { ... }
+@supports font-tech(...) { ... }
+@supports font-format(...) { ... }
+```
+
+`@supports` must use the engine's actual property/selector capabilities.
+
+Do not hardcode browser-like support strings.
+
+### 16.5 Container queries
+
+Container queries require layout context.
+
+The CSS engine should define a provider:
+
+```rust
+pub trait ContainerSizeProvider {
+    fn container_size(&self, node: NodeId) -> Option<ContainerSize>;
+}
+```
+
+Container query evaluation may require style/layout interleaving.
+
+M0 may disable container queries.
+
+M2/M3 should support size containers with explicit integration into `tpt-layout`.
+
+---
+
+## 17. Invalidation and incremental restyle
+
+### 17.1 Change types
+
+```rust
+pub enum StyleChange {
+    NodeInserted(NodeId),
+    NodeRemoved(NodeId),
+    NodeMoved(NodeId),
+    AttributeChanged(NodeId, AttrName),
+    StateChanged(NodeId, StateBits),
+    InlineStyleChanged(NodeId),
+    StyleSheetAdded(SheetId),
+    StyleSheetRemoved(SheetId),
+    RuleInserted(SheetId, RuleIndex),
+    RuleRemoved(SheetId, RuleIndex),
+    MediaQueryChanged,
+    ContainerSizeChanged(NodeId),
+    CustomPropertyChanged(NodeId, CustomPropertyName),
+    EnvironmentChanged(EnvironmentChange),
+}
+```
+
+### 17.2 Restyle hints
+
+```rust
+pub struct RestyleHint {
+    pub self_restyle: bool,
+    pub descendants: bool,
+    pub siblings: bool,
+    pub subtree: bool,
+}
+```
+
+The invalidation system must track:
+
+- id dependencies
+- class dependencies
+- attribute dependencies
+- state dependencies
+- structural pseudo-class dependencies
+- sibling combinator dependencies
+- `:has()` dependencies
+- custom property dependencies
+- media query dependencies
+- container query dependencies
+- scope/shadow dependencies
+
+### 17.3 Style sharing
+
+Style sharing is allowed only when safe.
+
+A sharing key should include:
+
+```text
+parent computed style
+element name
+namespace
+attributes
+classes
+state
+inline style
+scope/shadow context
+matched rule set or safe selector subset
+custom property inheritance context
+```
+
+Do not share styles across nodes affected by sibling-sensitive selectors unless the sibling context is proven equivalent.
+
+---
+
+## 18. CSSOM
+
+CSSOM is optional and enabled by the `web` profile.
+
+It should provide:
+
+```text
+CSSStyleSheet
+CSSRuleList
+CSSStyleRule
+CSSMediaRule
+CSSSupportsRule
+CSSLayerBlockRule
+CSSLayerStatementRule
+CSSContainerRule
+CSSScopeRule
+CSSKeyframesRule
+CSSKeyframeRule
+CSSFontFaceRule
+CSSPropertyRule
+CSSStyleDeclaration
+```
+
+Mutation APIs must invalidate style correctly.
+
+Examples:
+
+```rust
+sheet.insert_rule(rule, index);
+sheet.delete_rule(index);
+style_rule.selector_text = "...";
+style_declaration.set_property("color", "red");
+style_declaration.remove_property("color");
+```
+
+CSSOM serialization must be deterministic and spec-aligned.
+
+The AppFront profile may expose a smaller Rust-native mutation API instead of full CSSOM.
+
+---
+
+## 19. Error handling and limits
+
+### 19.1 No panics on hostile input
+
+The core must not panic on:
+
+- malformed tokens
+- unclosed blocks
+- invalid selectors
+- invalid declarations
+- huge numbers
+- deep nesting
+- invalid UTF-8 boundaries after input conversion
+- cyclic custom properties
+- recursive `var()` fallbacks
+- extremely long selector lists
+
+### 19.2 Limits
+
+```rust
+pub struct ParseLimits {
+    pub max_input_bytes: usize,
+    pub max_tokens: usize,
+    pub max_nesting_depth: usize,
+    pub max_selector_complexity: usize,
+    pub max_declarations_per_block: usize,
+    pub max_rules_per_sheet: usize,
+    pub max_var_depth: usize,
+    pub max_calc_depth: usize,
+}
+```
+
+Limits should be configurable.
+
+When a limit is exceeded, the engine should produce a diagnostic and recover safely.
+
+### 19.3 Diagnostics
+
+```rust
+pub struct Diagnostic {
+    pub severity: Severity,
+    pub code: DiagnosticCode,
+    pub span: Span,
+    pub message: String,
+    pub spec_url: Option<&'static str>,
+}
+```
+
+Diagnostics must not be required for normal style resolution.
+
+---
+
+## 20. Security and privacy
+
+### 20.1 No network in core
+
+The CSS core must not fetch URLs.
+
+`@import` and `url()` resolution should be delegated:
+
+```rust
+pub trait UrlResolver {
+    fn resolve(&self, base: Option<&Url>, value: &str) -> ResolvedUrl;
+}
+```
+
+The host decides whether loading is allowed.
+
+### 20.2 Visited-link privacy
+
+In Web mode, `:visited` must not leak history through arbitrary computed-style queries.
+
+The engine should support a visited-style policy:
+
+```rust
+pub struct VisitedPolicy {
+    pub allowed_properties: PropertySet,
+    pub computed_style_lies: bool,
+}
+```
+
+AppFront mode may disable visited semantics entirely.
+
+### 20.3 Resource exhaustion
+
+CSS is untrusted input.
+
+The engine must bound:
+
+- token count
+- nesting depth
+- selector matching work
+- variable substitution depth
+- calc depth
+- stylesheet count
+- rule count
+- custom property graph size
+
+### 20.4 No secret-dependent behavior
+
+The core should not introduce timing or behavior differences based on private host data unless explicitly modeled by a privacy policy.
+
+---
+
+## 21. Performance requirements
+
+### 21.1 Initial performance targets
+
+M0 should be able to:
+
+- tokenize at least hundreds of thousands of tokens per second on a normal desktop CPU
+- parse medium stylesheets without excessive allocation
+- resolve static trees with thousands of nodes
+- avoid quadratic selector matching in common cases
+
+These are engineering targets, not marketing claims.
+
+### 21.2 Allocation strategy
+
+Use:
+
+- arenas for AST nodes
+- atom interning for identifiers
+- compact property IDs
+- generational node IDs
+- reusable style arenas
+- cached selector matching results where safe
+
+Avoid:
+
+- string cloning in hot paths
+- random hash iteration affecting cascade
+- recursive descent without depth limits
+- per-node heap allocation for every property
+
+### 21.3 Determinism
+
+Cascade order must not depend on:
+
+- hash map iteration order
+- pointer addresses
+- thread scheduling
+- random seeds
+
+If parallelism is added later, it must preserve deterministic cascade results.
+
+---
+
+## 22. Testing and conformance
+
+### 22.1 Test categories
+
+Required test categories:
+
+```text
+tokenizer golden tests
+component value parser tests
+stylesheet parser tests
+selector parser tests
+selector matching tests
+specificity tests
+cascade origin tests
+cascade layer tests
+cascade scope tests
+inline style tests
+custom property cycle tests
+var fallback tests
+calc tests
+color tests
+property grammar tests
+inheritance tests
+pseudo-element tests
+media query tests
+supports query tests
+invalidation tests
+style sharing tests
+serialization tests
+fuzz tests
+```
+
+### 22.2 External conformance
+
+Use external conformance suites as oracles where licensing permits.
+
+For strict MIT-only distribution:
+
+- do not vendor non-MIT test assets into the shipped MIT tree
+- run external suites in CI from separate checkouts
+- write own MIT fixtures from spec behavior
+- record pass/fail deltas in `SPEC_TRACE.md`
+
+Primary external oracles:
+
+```text
+web-platform-tests CSS subsuites
+test262 is not relevant to CSS
+```
+
+### 22.3 Fuzzing
+
+Fuzz targets:
+
+```text
+tokenizer
+stylesheet parser
+selector parser
+declaration parser
+var substitution
+calc parser
+color parser
+```
+
+Fuzzing must run with limits enabled and without panics.
+
+### 22.4 Property-based tests
+
+Property-based tests should cover:
+
+- specificity ordering
+- cascade stability
+- shorthand expansion round trips
+- calc simplification invariants
+- selector list equivalence for `:is()`/`:where()`
+- custom property cycle detection
+- serialization determinism
+
+### 22.5 Spec traceability
+
+`SPEC_TRACE.md` should map:
+
+```text
+spec section
+  -> module
+  -> algorithm
+  -> tests
+  -> external conformance status
+  -> known gaps
+```
+
+Example:
+
+```text
+CSS Syntax 3 § consume a token
+  -> src/syntax/tokenizer.rs
+  -> consume_token()
+  -> tests/syntax/tokenizer.rs
+  -> WPT css-syntax status: external
+```
+
+---
+
+## 23. Clean-room and license policy
+
+### 23.1 Clean-room rules
+
+Contributors must not:
+
+- copy code from other CSS engines
+- port code from other CSS engines
+- translate C++/Rust/JS implementation code from other engines
+- wrap existing CSS parsers or style engines
+- paste implementation code from Stack Overflow or other copyleft sources
+- use AI-generated code that reproduces non-MIT implementation code
+
+Contributors should:
+
+- read public specifications
+- write own algorithm notes
+- write own Rust implementation
+- write own MIT tests
+- cite spec sections
+- record provenance in `CLEAN_ROOM.md`
+
+### 23.2 License rules
+
+All first-party files must include:
+
+```rust
+// SPDX-License-Identifier: MIT OR Apache-2.0
+```
+
+The repo must contain:
+
+```text
+LICENSE-MIT
+LICENSE-APACHE
+NOTICE
+README.md
+CLEAN_ROOM.md
+deny.toml
+```
+
+Core dependency policy:
+
+```text
+no third-party crates
+```
+
+Optional integration dependency policy:
+
+```text
+approved tpt crates only
+must offer MIT as a license option (`MIT` or `MIT OR Apache-2.0`)
+Apache-only dependencies forbidden (any license that does not include MIT)
+MPL/GPL/LGPL forbidden
+non-MIT test assets not vendored by default
+```
+
+If the project later relaxes "strict MIT" to "MIT-compatible," that must be an explicit policy change, not an accidental dependency introduction.
+
+### 23.3 CI gates
+
+CI must run:
+
+```text
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+cargo test --no-default-features
+cargo test --features web
+cargo deny check licenses
+cargo deny check bans
+fuzz smoke
+spec trace check
+unsafe check
+```
+
+Core should enforce:
+
+```rust
+#![forbid(unsafe_code)]
+```
+
+---
+
+## 24. Milestones
+
+### M0: syntax + basic cascade
+
+Deliver:
+
+- tokenizer
+- component values
+- stylesheet parser
+- declaration parser
+- basic selector parser
+- basic selector matching
+- specificity
+- origin/importance/specificity/order cascade
+- inline style
+- inheritance
+- initial values
+- basic property registry
+- AppFront tree adapter contract
+- static DOM-adapter test fixture
+- own MIT golden tests
+
+Acceptance:
+
+```text
+Parse a stylesheet.
+Match basic selectors against an abstract tree.
+Compute styles for a static tree.
+Produce deterministic computed styles.
+No DOM dependency.
+No third-party core dependency.
+No unsafe.
+```
+
+### M1: practical CSS
+
+Deliver:
+
+- full Tier 1 selectors
+- sibling combinators
+- pseudo-elements
+- custom properties
+- `var()`
+- cycle detection
+- `calc()`
+- media queries
+- `@media`
+- basic colors
+- basic lengths
+- shorthand expansion
+- CSS-wide keywords
+- invalidation foundation
+
+Acceptance:
+
+```text
+Style a nontrivial AppFront document.
+Style a static web-like fixture tree.
+Pass own selector/cascade/var/calc fixtures.
+External CSS syntax/selectors/cascade oracle shows measurable progress.
+```
+
+### M2: modern cascade
+
+Deliver:
+
+- `@layer`
+- `@supports`
+- `@scope`
+- nesting
+- `@container` foundation
+- `@property`
+- registered custom properties
+- `revert`
+- `revert-layer`
+- `all`
+- animation/transition cascade origins
+- keyframe style resolution
+- font-face rule parsing
+- modern color functions
+- viewport/container units
+
+Acceptance:
+
+```text
+Cascade layers and scope behave correctly.
+Registered custom properties compute correctly.
+Container queries can integrate with a size provider.
+Animation declarations participate in cascade correctly.
+```
+
+### M3: incremental style + CSSOM
+
+Deliver:
+
+- selector dependency graph
+- custom property dependency graph
+- restyle hints
+- style sharing
+- CSSOM mutation APIs
+- serialization
+- `getComputedStyle` support contract
+- devtools-facing inspection data
+- visited-link privacy policy
+- Web profile integration tests
+
+Acceptance:
+
+```text
+Mutate a stylesheet and restyle incrementally.
+Mutate node state and restyle incrementally.
+Expose computed styles through a web-compatible adapter.
+No full-document restyle for simple local changes.
+```
+
+### M4: long-tail web compatibility
+
+Deliver:
+
+- long-tail selectors
+- long-tail properties
+- advanced values
+- advanced colors
+- advanced media features
+- shadow DOM edge cases
+- parts/slotted/highlight pseudos
+- serialization edge cases
+- external conformance expansion
+
+Acceptance:
+
+```text
+The engine becomes a continuously improving CSS conformance project.
+Compat is treated as a treadmill, not a finish line.
+```
+
+---
+
+## 25. Open design questions
+
+These should be resolved before or during M0/M1:
+
+1. **Numeric representation**
+   - Start with `f64`, or implement a decimal/rational CSS number type immediately?
+
+2. **Atom interning**
+   - Build a custom deterministic interner, or use an approved tpt primitive?
+
+3. **Tree contract ownership**
+   - Should `StyleTree` return slices, iterators, or arena-backed handles?
+
+4. **Pseudo-element representation**
+   - Generated nodes inside the style tree, or side tables keyed by node + pseudo?
+
+5. **Font metrics provider**
+   - How much font-relative computation belongs in CSS versus layout/font systems?
+
+6. **Container query integration**
+   - How will style resolution request container sizes without creating layout cycles?
+
+7. **Animation boundary**
+   - Should interpolation live in `tpt-css`, `tpt-layout`, or a separate animation crate?
+
+8. **CSSOM serialization**
+   - How much round-trip fidelity is required for M3?
+
+9. **UA stylesheet**
+   - Should the Web UA stylesheet live in `tpt-css`, `tpt-dom`, or `tpt-html`?
+
+10. **Strict license interpretation**
+    - Resolved: first-party code is dual `MIT OR Apache-2.0`.
+    - Still open: dependency policy. The default is no third-party core dependencies.
+    - Resolved: no Apache-only dependencies. Every allowed dependency must offer MIT.
+
+---
+
+## 26. First implementation target
+
+The first concrete deliverable should be:
+
+```text
+tpt-css M0
+```
+
+with this end-to-end path:
+
+```text
+CSS string
+  -> tokenizer
+  -> stylesheet AST
+  -> basic selector matching
+  -> basic cascade
+  -> computed styles
+  -> abstract StyleTree
+```
+
+It must work with both:
+
+```text
+AppFront-style test tree
+DOM-adapter-style test tree
+```
+
+using the exact same resolver.
+
+The first commit should establish:
+
+```text
+dual MIT OR Apache-2.0 license files (LICENSE-MIT, LICENSE-APACHE, NOTICE)
+clean-room policy
+spec traceability file
+no third-party core dependencies
+#![forbid(unsafe_code)]
+tokenizer module
+component value module
+basic AST
+basic parser
+basic selector AST
+basic cascade key
+abstract tree contract
+golden test harness
+```
+
+That gives `tpt-css` a real foundation without pretending the whole CSS platform is already solved.
