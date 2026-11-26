@@ -151,3 +151,30 @@ fn a_malformed_scope_prelude_drops_the_rule() {
     );
     assert!(parsed.stylesheet.rules.is_empty());
 }
+
+#[test]
+fn time_state_functions_need_the_state_and_the_argument() {
+    use tpt_css::tree::StateBits;
+    let css =
+        "li:current(.a) { color: red } li:past(.a) { color: green } li:future { color: blue }";
+    let mut t = TestTree::new(NodeKind::Element);
+    let root = t.root();
+    let list = t.element(root, "ul");
+    let current_a = t.element(list, "li");
+    t.add_class(current_a, "a");
+    t.set_state(current_a, StateBits::CURRENT);
+    let past_a = t.element(list, "li");
+    t.add_class(past_a, "a");
+    t.set_state(past_a, StateBits::PAST);
+    let current_plain = t.element(list, "li");
+    t.set_state(current_plain, StateBits::CURRENT);
+    let future = t.element(list, "li");
+    t.set_state(future, StateBits::FUTURE);
+
+    let color = |node| style_of(&style_with(css, &t), node).color();
+    assert_eq!(color(current_a), tpt_css::values::Color::rgb8(255, 0, 0));
+    assert_eq!(color(past_a), tpt_css::values::Color::rgb8(0, 128, 0));
+    // Current but not `.a`: no rule matches it.
+    assert_eq!(color(current_plain), tpt_css::values::Color::BLACK);
+    assert_eq!(color(future), tpt_css::values::Color::rgb8(0, 0, 255));
+}

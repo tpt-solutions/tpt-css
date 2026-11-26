@@ -488,6 +488,9 @@ impl<'a, T: StyleTree> Matcher<'a, T> {
             SimpleSelector::CustomState(name) => self.tree.state(node).custom.contains(name),
             SimpleSelector::Not(list) => !self.list_matches(node, list),
             SimpleSelector::Is(list) | SimpleSelector::Where(list) => self.list_matches(node, list),
+            SimpleSelector::TimeState { state, list } => {
+                self.pseudo_class_matches(node, *state) && self.list_matches(node, list)
+            }
             SimpleSelector::Lang(tag) => language_matches(self.tree, node, tag),
             SimpleSelector::Dir(dir) => inherited_direction(self.tree, node) == Some(*dir),
             SimpleSelector::Has(relatives) => self.has_matches(node, relatives),

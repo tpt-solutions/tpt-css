@@ -80,6 +80,14 @@ pub enum SimpleSelector {
     Is(SelectorList),
     /// `:where(list)`
     Where(SelectorList),
+    /// `:current(list)`, `:past(list)`, `:future(list)` (Selectors 4): the state
+    /// pseudo-class, and the element must also match the list.
+    TimeState {
+        /// `Current`, `Past`, or `Future`.
+        state: PseudoClass,
+        /// The argument.
+        list: SelectorList,
+    },
     /// `:lang(tag)`
     Lang(String),
     /// `:dir(ltr | rtl)`

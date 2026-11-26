@@ -363,6 +363,10 @@ fn replace_nesting(
         SimpleSelector::Where(list) => {
             SimpleSelector::Where(resolve_inner(list, parent, had_nesting))
         }
+        SimpleSelector::TimeState { state, list } => SimpleSelector::TimeState {
+            state: *state,
+            list: resolve_inner(list, parent, had_nesting),
+        },
         other => other.clone(),
     }
 }
@@ -401,6 +405,7 @@ pub(crate) fn contains_nesting(list: &SelectorList) -> bool {
                 SimpleSelector::Is(l) | SimpleSelector::Not(l) | SimpleSelector::Where(l) => {
                     contains_nesting(l)
                 }
+                SimpleSelector::TimeState { list, .. } => contains_nesting(list),
                 _ => false,
             })
         })
@@ -519,6 +524,21 @@ fn functional_pseudo(
                 "is" => SimpleSelector::Is(list),
                 _ => SimpleSelector::Where(list),
             })
+        }
+        "current" | "past" | "future" => {
+            let list = parse_list_at(trim_whitespace(&f.value), limits, depth + 1)?;
+            if list.selectors.iter().any(|s| s.pseudo_element.is_some()) {
+                return Err(invalid(
+                    f.span,
+                    "pseudo-elements are not allowed in this argument",
+                ));
+            }
+            let state = match name.as_str() {
+                "current" => PseudoClass::Current,
+                "past" => PseudoClass::Past,
+                _ => PseudoClass::Future,
+            };
+            Ok(SimpleSelector::TimeState { state, list })
         }
         "host" => {
             let list = parse_list_at(trim_whitespace(&f.value), limits, depth + 1)?;

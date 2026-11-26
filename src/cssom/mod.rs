@@ -534,6 +534,14 @@ fn serialize_simple(simple: &SimpleSelector) -> String {
         SimpleSelector::Not(list) => format!(":not({})", serialize_selector_list(list)),
         SimpleSelector::Is(list) => format!(":is({})", serialize_selector_list(list)),
         SimpleSelector::Where(list) => format!(":where({})", serialize_selector_list(list)),
+        SimpleSelector::TimeState { state, list } => {
+            let name = match state {
+                PseudoClass::Past => "past",
+                PseudoClass::Future => "future",
+                _ => "current",
+            };
+            format!(":{name}({})", serialize_selector_list(list))
+        }
         SimpleSelector::Lang(tag) => format!(":lang({tag})"),
         SimpleSelector::Dir(dir) => format!(
             ":dir({})",
