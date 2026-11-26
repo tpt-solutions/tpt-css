@@ -20,9 +20,12 @@ use std::collections::BTreeSet;
 
 use crate::ast::selector::{ComplexSelector, SelectorList, SimpleSelector};
 use crate::env::Environment;
+use crate::properties::registry::ids;
+use crate::properties::SpecifiedValue;
 use crate::style::computed::StyleMap;
-use crate::style::resolver::{style_tree, Frame, StyleResolver};
+use crate::style::resolver::{style_tree, CompiledDecl, DeclTarget, Frame, StyleResolver};
 use crate::tree::{NodeId, NodeKind, StyleTree};
+use crate::values::{ContentItem, Value};
 
 /// A change that may require restyling (spec 17.1).
 ///
@@ -108,7 +111,7 @@ impl StyleResolver {
         }
         self.attr_deps
             .as_ref()
-            .is_some_and(|deps| deps.contains(&lower))
+            .is_some_and(|deps| deps.contains(ANY_ATTRIBUTE) || deps.contains(&lower))
     }
 
     /// Every attribute name that a rule's selectors can read: the `id` and
@@ -119,6 +122,7 @@ impl StyleResolver {
         for sheet in &self.sheets {
             for rule in &sheet.rules {
                 collect_list(&rule.selectors, &mut out);
+                collect_content_attrs(&rule.decls, &mut out);
                 for scope in &rule.scopes {
                     if let Some(root) = &scope.root {
                         collect_list(root, &mut out);
@@ -215,6 +219,34 @@ fn rem_base_for<T: StyleTree>(
 }
 
 /// Adds every attribute name in a selector list (see `collect_attribute_names`).
+/// Marker in the attribute-name set meaning "every attribute may be read". A
+/// `content` value that still holds `var()` cannot be checked until computed
+/// time, so any change may matter.
+const ANY_ATTRIBUTE: &str = "*";
+
+/// Adds the attribute names read by `attr()` in `content` declarations. A
+/// `content` declaration with `var()` adds [`ANY_ATTRIBUTE`].
+fn collect_content_attrs(decls: &[CompiledDecl], out: &mut BTreeSet<String>) {
+    for decl in decls {
+        if !matches!(decl.target, DeclTarget::Prop(id) if id == ids::CONTENT) {
+            continue;
+        }
+        match &decl.value {
+            SpecifiedValue::Value(Value::Content(items)) => {
+                for item in items {
+                    if let ContentItem::Attr(name) = item {
+                        out.insert(name.clone());
+                    }
+                }
+            }
+            SpecifiedValue::Unparsed { .. } => {
+                out.insert(ANY_ATTRIBUTE.to_string());
+            }
+            _ => {}
+        }
+    }
+}
+
 fn collect_list(list: &SelectorList, out: &mut BTreeSet<String>) {
     for complex in &list.selectors {
         collect_complex(complex, out);

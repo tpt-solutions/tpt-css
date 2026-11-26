@@ -320,3 +320,26 @@ fn a_custom_property_change_reaches_descendants_that_read_it() {
     assert_eq!(map.get(p).unwrap().color(), Color::rgb8(0, 255, 0));
     assert_eq!(map, full(css, &t, &env));
 }
+
+#[test]
+fn an_attribute_read_by_content_restyles_the_pseudo_element() {
+    let css = "p::before { content: attr(data-label) }";
+    let env = Environment::default();
+    let mut t = TestTree::new(NodeKind::Element);
+    let root = t.root();
+    t.nodes[0].name.local = "html".into();
+    let p = t.element(root, "p");
+    let mut r = resolver_for(css);
+    let _ = r.resolve(&t, &env);
+    t.set_attr(p, "data-label", "new");
+    r.invalidate(&t, StyleChange::AttributeNamed(p, "data-label".to_string()));
+    let map = r.restyle(&t, &env).clone();
+    let before = map
+        .get_pseudo(p, &tpt_css::selectors::PseudoElement::Before)
+        .expect("::before is generated");
+    assert_eq!(
+        *before.raw(tpt_css::properties::lookup("content").unwrap()),
+        tpt_css::values::Value::Strings(vec!["new".to_string()])
+    );
+    assert_eq!(map, full(css, &t, &env));
+}

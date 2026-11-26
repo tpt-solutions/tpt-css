@@ -8,7 +8,7 @@
 //! the legacy `rgb()` and `rgba()` forms with 8-bit channels.
 
 use super::calc;
-use super::{color::Color, Value};
+use super::{color::Color, ContentItem, Value};
 
 /// Serializes a value in canonical form.
 pub fn serialize_value(value: &Value) -> String {
@@ -41,6 +41,24 @@ pub fn serialize_value(value: &Value) -> String {
             .map(|s| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")))
             .collect::<Vec<_>>()
             .join(" "),
+        Value::Content(items) => items
+            .iter()
+            .map(|item| match item {
+                ContentItem::Text(s) => {
+                    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+                }
+                ContentItem::Attr(name) => format!("attr({name})"),
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+        Value::Elliptical {
+            horizontal,
+            vertical,
+        } => format!(
+            "{} {}",
+            serialize_value(horizontal),
+            serialize_value(vertical)
+        ),
         Value::Calc(node) => calc::serialize(node),
     }
 }

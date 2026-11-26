@@ -68,8 +68,36 @@ const RADIUS: [&str; 4] = [
     "border-bottom-left-radius",
 ];
 
+/// `border-radius: <horizontal>{1,4} [ / <vertical>{1,4} ]?` (CSS Backgrounds 3
+/// section 5.1). Without a slash, the vertical radii equal the horizontal ones.
+/// Each corner whose two radii differ becomes an elliptical value.
 fn radius_expand(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> {
-    sides(values, RADIUS)
+    let Some(slash) = values
+        .iter()
+        .position(|v| v.is_token(&TokenKind::Delim('/')))
+    else {
+        return sides(values, RADIUS);
+    };
+    let horizontal = sides(&values[..slash], RADIUS)?;
+    let vertical = sides(&values[slash + 1..], RADIUS)?;
+    horizontal
+        .into_iter()
+        .zip(vertical)
+        .map(|((name, h), (_, v))| {
+            let (SpecifiedValue::Value(h), SpecifiedValue::Value(v)) = (h, v) else {
+                return Err(InvalidValue);
+            };
+            let value = if h == v {
+                h
+            } else {
+                Value::Elliptical {
+                    horizontal: Box::new(h),
+                    vertical: Box::new(v),
+                }
+            };
+            Ok((name, SpecifiedValue::Value(value)))
+        })
+        .collect()
 }
 
 /// Every shorthand supported in M1. A shorthand's index in this table is the
@@ -182,6 +210,7 @@ pub const SHORTHANDS: &[ShorthandSpec] = &[
             "text-decoration-line",
             "text-decoration-style",
             "text-decoration-color",
+            "text-decoration-thickness",
         ],
         expand: text_decoration,
     },
@@ -353,6 +382,7 @@ fn text_decoration(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> 
     let mut saw_none = false;
     let mut style = None;
     let mut color = None;
+    let mut thickness = None;
     for part in &parts {
         if let [ComponentValue::Token(t)] = part {
             if let TokenKind::Ident(word) = &t.kind {
@@ -384,6 +414,12 @@ fn text_decoration(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> 
                 continue;
             }
         }
+        if thickness.is_none() {
+            if let Ok(v) = parse_as("text-decoration-thickness", part) {
+                thickness = Some(v);
+                continue;
+            }
+        }
         return Err(InvalidValue);
     }
     if saw_none && bits != 0 {
@@ -406,6 +442,10 @@ fn text_decoration(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> 
         (
             "text-decoration-color",
             color.unwrap_or_else(|| initial_value("text-decoration-color")),
+        ),
+        (
+            "text-decoration-thickness",
+            thickness.unwrap_or_else(|| initial_value("text-decoration-thickness")),
         ),
     ])
 }

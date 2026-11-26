@@ -42,8 +42,9 @@ use crate::style::custom::{
 };
 use crate::syntax::{trim_whitespace, ComponentValue, TokenKind};
 use crate::tree::scope::shadow_root_of;
+use crate::tree::Attributes;
 use crate::tree::{NodeId, NodeKind, StyleTree};
-use crate::values::{Color, Value};
+use crate::values::{Color, ContentItem, Value};
 
 /// Identifies a stylesheet added to a resolver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -870,6 +871,7 @@ pub(crate) fn style_tree<T: StyleTree>(
                     limits,
                     &resolver.registered,
                     container,
+                    tree.attributes(frame.node),
                 );
 
                 map.clear_pseudo(frame.node);
@@ -883,6 +885,7 @@ pub(crate) fn style_tree<T: StyleTree>(
                             limits,
                             &resolver.registered,
                             container,
+                            tree.attributes(frame.node),
                         );
                         if is_generated(&pseudo, &pstyle) {
                             map.insert_pseudo(frame.node, pseudo, pstyle);
@@ -965,6 +968,8 @@ fn custom_declared(candidates: &[Winner]) -> Option<SpecifiedValue> {
 }
 
 /// Computes the style of one target from its candidate declarations.
+// The eight inputs are each distinct; bundling them would only move the list.
+#[allow(clippy::too_many_arguments)]
 fn compute_style(
     cas: &Cascaded,
     parent: Option<&ComputedStyle>,
@@ -973,6 +978,7 @@ fn compute_style(
     limits: &ParseLimits,
     registered: &BTreeMap<String, RegisteredProperty>,
     container: Option<(f64, f64)>,
+    attrs: &Attributes,
 ) -> ComputedStyle {
     let declared: BTreeMap<String, SpecifiedValue> = cas
         .custom
@@ -1006,6 +1012,7 @@ fn compute_style(
     for idx in compute_order() {
         let id = PropertyId(idx as u16);
         let specified = specified_value(idx, &cas.props[idx], parent, &customs, limits);
+        let specified = substitute_attrs(specified, attrs);
         let computed = compute_value(id, spec(id).grammar, specified, &ctx);
         if id == ids::FONT_SIZE {
             if let Value::Length { value, .. } = computed {
@@ -1034,6 +1041,24 @@ fn compute_style(
     }
 
     ComputedStyle::from_values(values, customs)
+}
+
+/// Replaces `attr()` in a `content` value with the element's attribute values
+/// (CSS Generated Content 3). Missing attributes contribute the empty string.
+fn substitute_attrs(value: Value, attrs: &Attributes) -> Value {
+    match value {
+        Value::Content(items) => {
+            let strings = items
+                .into_iter()
+                .map(|item| match item {
+                    ContentItem::Text(s) => s,
+                    ContentItem::Attr(name) => attrs.get(&name).unwrap_or("").to_string(),
+                })
+                .collect();
+            Value::Strings(strings)
+        }
+        other => other,
+    }
 }
 
 /// Order in which properties are computed: font-size first (its `em` depends on

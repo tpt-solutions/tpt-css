@@ -59,6 +59,9 @@ pub enum Grammar {
     Content,
     /// `opacity`: a number, clamped to `[0, 1]`. Percentages are accepted.
     Opacity,
+    /// A corner radius: one or two non-negative lengths or percentages
+    /// (horizontal, then vertical). Two equal values are stored as one.
+    BorderRadius,
     /// An integer, or one of the keywords (`z-index`).
     Integer {
         /// Extra keywords accepted in place of an integer.
@@ -863,10 +866,7 @@ pub const PROPERTIES: &[PropertySpec] = &[
         name: "border-top-left-radius",
         inherited: false,
         initial: Initial::Px(0.0),
-        grammar: Grammar::LengthPercentage {
-            non_negative: true,
-            keywords: NO_KEYWORDS,
-        },
+        grammar: Grammar::BorderRadius,
         spec_url: CSS_BACKGROUNDS,
     },
     // 81
@@ -874,10 +874,7 @@ pub const PROPERTIES: &[PropertySpec] = &[
         name: "border-top-right-radius",
         inherited: false,
         initial: Initial::Px(0.0),
-        grammar: Grammar::LengthPercentage {
-            non_negative: true,
-            keywords: NO_KEYWORDS,
-        },
+        grammar: Grammar::BorderRadius,
         spec_url: CSS_BACKGROUNDS,
     },
     // 82
@@ -885,10 +882,7 @@ pub const PROPERTIES: &[PropertySpec] = &[
         name: "border-bottom-right-radius",
         inherited: false,
         initial: Initial::Px(0.0),
-        grammar: Grammar::LengthPercentage {
-            non_negative: true,
-            keywords: NO_KEYWORDS,
-        },
+        grammar: Grammar::BorderRadius,
         spec_url: CSS_BACKGROUNDS,
     },
     // 83
@@ -896,11 +890,19 @@ pub const PROPERTIES: &[PropertySpec] = &[
         name: "border-bottom-left-radius",
         inherited: false,
         initial: Initial::Px(0.0),
+        grammar: Grammar::BorderRadius,
+        spec_url: CSS_BACKGROUNDS,
+    },
+    // 84
+    PropertySpec {
+        name: "text-decoration-thickness",
+        inherited: false,
+        initial: Initial::Keyword("auto"),
         grammar: Grammar::LengthPercentage {
             non_negative: true,
-            keywords: NO_KEYWORDS,
+            keywords: &["auto", "from-font"],
         },
-        spec_url: CSS_BACKGROUNDS,
+        spec_url: CSS_TEXT_DECOR,
     },
 ];
 
