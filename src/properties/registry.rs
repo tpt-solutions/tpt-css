@@ -155,6 +155,17 @@ const BOX_SIZING_KEYWORDS: &[&str] = &["content-box", "border-box"];
 const OVERFLOW_KEYWORDS: &[&str] = &["visible", "hidden", "clip", "scroll", "auto"];
 const POSITION_KEYWORDS: &[&str] = &["static", "relative", "absolute", "fixed", "sticky"];
 /// `font-stretch` keywords (CSS Fonts 4 section 2.2). A percentage is also accepted.
+/// `font-variant-caps` keywords (CSS Fonts 4 section 6.1).
+pub(crate) const FONT_VARIANT_CAPS_KEYWORDS: &[&str] = &[
+    "normal",
+    "small-caps",
+    "all-small-caps",
+    "petite-caps",
+    "all-petite-caps",
+    "unicase",
+    "titling-caps",
+];
+
 pub(crate) const FONT_STRETCH_KEYWORDS: &[&str] = &[
     "normal",
     "ultra-condensed",
@@ -933,6 +944,14 @@ pub const PROPERTIES: &[PropertySpec] = &[
         inherited: true,
         initial: Initial::Keyword("normal"),
         grammar: Grammar::FontStretch,
+        spec_url: CSS_FONTS,
+    },
+    // 87
+    PropertySpec {
+        name: "font-variant-caps",
+        inherited: true,
+        initial: Initial::Keyword("normal"),
+        grammar: Grammar::Keywords(FONT_VARIANT_CAPS_KEYWORDS),
         spec_url: CSS_FONTS,
     },
 ];

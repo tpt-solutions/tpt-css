@@ -195,6 +195,7 @@ pub const SHORTHANDS: &[ShorthandSpec] = &[
             "font-style",
             "font-weight",
             "font-stretch",
+            "font-variant-caps",
             "font-size",
             "line-height",
             "font-family",
@@ -217,7 +218,30 @@ pub const SHORTHANDS: &[ShorthandSpec] = &[
         ],
         expand: text_decoration,
     },
+    ShorthandSpec {
+        name: "font-variant",
+        longhands: &["font-variant-caps"],
+        expand: font_variant,
+    },
 ];
+
+/// `font-variant`, for the one longhand this engine has, `font-variant-caps`
+/// (CSS Fonts 4 section 6). `none` means `normal`. The other sub-values of the
+/// full shorthand (ligatures, numeric, and the rest) are not supported, so a
+/// value that names one of them is invalid and the declaration is dropped.
+fn font_variant(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> {
+    let parts = chunks(values);
+    let [part] = parts.as_slice() else {
+        return Err(InvalidValue);
+    };
+    let caps = match part {
+        [ComponentValue::Token(t)] if matches!(&t.kind, TokenKind::Ident(w) if w.eq_ignore_ascii_case("none")) => {
+            initial_value("font-variant-caps")
+        }
+        _ => parse_as("font-variant-caps", part)?,
+    };
+    Ok(vec![("font-variant-caps", caps)])
+}
 
 /// `font: [style] [weight] [stretch] size [/ line-height] family` (CSS Fonts 4
 /// section 4.3).
@@ -236,8 +260,9 @@ fn font(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> {
     let mut style = None;
     let mut weight = None;
     let mut stretch = None;
+    let mut variant = None;
     let mut k = 0;
-    // Style, weight, and stretch come before the size, in any order.
+    // Style, weight, stretch, and small-caps come before the size, in any order.
     let size = loop {
         let item = items.get(k).ok_or(InvalidValue)?.1;
         if let Ok(size) = parse_as("font-size", std::slice::from_ref(item)) {
@@ -268,6 +293,16 @@ fn font(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> {
             if let Ok(v) = parse_as("font-stretch", std::slice::from_ref(item)) {
                 if !matches!(v, SpecifiedValue::CssWide(_)) {
                     stretch = Some(v);
+                    k += 1;
+                    continue;
+                }
+            }
+        }
+        // Only `small-caps` is allowed here (CSS Fonts 4 `font-variant-css2`).
+        if variant.is_none() {
+            if let Ok(v) = parse_as("font-variant-caps", std::slice::from_ref(item)) {
+                if matches!(v, SpecifiedValue::Value(Value::Keyword("small-caps"))) {
+                    variant = Some(v);
                     k += 1;
                     continue;
                 }
@@ -304,6 +339,10 @@ fn font(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> {
         (
             "font-stretch",
             stretch.unwrap_or(SpecifiedValue::Value(Initial::Keyword("normal").to_value())),
+        ),
+        (
+            "font-variant-caps",
+            variant.unwrap_or(SpecifiedValue::Value(Initial::Keyword("normal").to_value())),
         ),
         ("font-size", size),
         ("line-height", line_height),
