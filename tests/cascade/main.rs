@@ -142,7 +142,7 @@ fn resolve_two_sheets(ua_css: &str, author_css: &str, tree: &TestTree) -> StyleM
     let mut r = StyleResolver::new(ResolverConfig::default());
     r.add_stylesheet(parse_sheet(ua_css).stylesheet, Origin::UserAgent);
     r.add_stylesheet(parse_sheet(author_css).stylesheet, Origin::Author);
-    r.resolve(tree, &Environment::default())
+    r.resolve(tree, &Environment::default()).clone()
 }
 
 fn color_of(style: &ComputedStyle) -> Color {
@@ -215,9 +215,9 @@ fn removing_a_sheet_removes_its_declarations() {
     let p = t.element(t.root(), "p");
     let mut r = StyleResolver::new(ResolverConfig::default());
     let id = r.add_stylesheet(parse_sheet("p { color: red }").stylesheet, Origin::Author);
-    let with = r.resolve(&t, &Environment::default());
+    let with = r.resolve(&t, &Environment::default()).clone();
     r.remove_stylesheet(id);
-    let without = r.resolve(&t, &Environment::default());
+    let without = r.resolve(&t, &Environment::default()).clone();
     assert_eq!(color_of(with.get(p).unwrap()), Color::rgb8(255, 0, 0));
     assert_eq!(color_of(without.get(p).unwrap()), Color::BLACK);
     assert_eq!(

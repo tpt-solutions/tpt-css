@@ -75,7 +75,7 @@ fn resolver() -> StyleResolver {
 #[test]
 fn the_theme_flows_through_custom_properties() {
     let a = app();
-    let map = resolver().resolve(&a.tree, &Environment::default());
+    let map = resolver().resolve(&a.tree, &Environment::default()).clone();
     assert_eq!(
         style_of(&map, a.button).color(),
         Color::rgb8(0x0a, 0x84, 0xff)
@@ -91,7 +91,7 @@ fn the_theme_flows_through_custom_properties() {
 #[test]
 fn layers_order_the_base_and_component_rules() {
     let a = app();
-    let map = resolver().resolve(&a.tree, &Environment::default());
+    let map = resolver().resolve(&a.tree, &Environment::default()).clone();
     // The reset layer sets margin-left to 0 for every element; nothing later
     // overrides it, so it holds even though the component layer comes last.
     assert_eq!(value(&map, a.button, "margin-left"), Value::px(0.0));
@@ -113,7 +113,7 @@ fn a_custom_state_changes_the_component_and_restyles_incrementally() {
     assert_eq!(style_of(map, a.button).color(), Color::rgb8(128, 128, 128));
     assert_eq!(
         *map,
-        resolver().resolve(&a.tree, &env),
+        resolver().resolve(&a.tree, &env).clone(),
         "restyle matches a full resolve"
     );
 }
@@ -122,7 +122,7 @@ fn a_custom_state_changes_the_component_and_restyles_incrementally() {
 fn checked_input_makes_its_label_green_through_has() {
     let mut a = app();
     a.tree.set_state(a.input, StateBits::CHECKED);
-    let map = resolver().resolve(&a.tree, &Environment::default());
+    let map = resolver().resolve(&a.tree, &Environment::default()).clone();
     assert_eq!(style_of(&map, a.label).color(), Color::rgb8(0, 128, 0));
 }
 
@@ -137,6 +137,6 @@ fn a_narrow_viewport_tightens_the_row() {
         media: MediaEnvironment::default(),
         ..Environment::default()
     };
-    let map = resolver().resolve(&a.tree, &narrow);
+    let map = resolver().resolve(&a.tree, &narrow).clone();
     assert_eq!(value(&map, a.row, "padding-top"), Value::px(4.0));
 }

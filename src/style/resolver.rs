@@ -299,7 +299,7 @@ impl StyleResolver {
     }
 
     /// Computes styles for every element in `tree` (spec 8.2).
-    pub fn resolve<T: StyleTree>(&mut self, tree: &T, env: &Environment) -> StyleMap {
+    pub fn resolve<T: StyleTree>(&mut self, tree: &T, env: &Environment) -> &StyleMap {
         let active = self.active_rules(env);
         let mut map = StyleMap::default();
         let limits = &self.config.limits;
@@ -315,7 +315,7 @@ impl StyleResolver {
         });
         self.dirty.clear();
         self.full_dirty = false;
-        map
+        self.cached_map()
     }
 
     /// Whether each rule's media conditions hold in `env`, indexed by sheet, then rule.

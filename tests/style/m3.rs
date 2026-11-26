@@ -437,7 +437,7 @@ fn margin_with_calc_limit(css: &str, max_calc_depth: usize) -> Value {
     });
     r.add_stylesheet(parsed.stylesheet, Origin::Author);
     let map = r.resolve(&t, &Environment::default());
-    style_of(&map, child)
+    style_of(map, child)
         .raw(lookup("margin-left").unwrap())
         .clone()
 }
@@ -610,7 +610,7 @@ fn the_stylesheet_count_is_bounded_and_the_overflow_is_reported() {
     let (t, _, child) = chain();
     let map = r.resolve(&t, &Environment::default());
     assert!(px_near(
-        style_of(&map, child).raw(lookup("margin-left").unwrap()),
+        style_of(map, child).raw(lookup("margin-left").unwrap()),
         1.0
     ));
 }

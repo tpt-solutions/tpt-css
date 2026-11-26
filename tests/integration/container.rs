@@ -45,7 +45,7 @@ fn margin(css: &str, width: f64, name: Option<&str>) -> Value {
         },
     )])));
     let map = resolver.resolve(&t, &Environment::default());
-    style_of(&map, leaf)
+    style_of(map, leaf)
         .raw(lookup("margin-left").unwrap())
         .clone()
 }
@@ -81,7 +81,7 @@ fn without_a_provider_container_queries_do_not_apply() {
     );
     let map = resolver.resolve(&t, &Environment::default());
     assert_eq!(
-        style_of(&map, leaf).raw(lookup("margin-left").unwrap()),
+        style_of(map, leaf).raw(lookup("margin-left").unwrap()),
         &Value::px(0.0)
     );
 }

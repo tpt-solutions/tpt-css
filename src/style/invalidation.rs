@@ -172,7 +172,7 @@ impl StyleResolver {
     }
 
     /// The map held by the cache. Every path that fills the cache leaves it set.
-    fn cached_map(&self) -> &StyleMap {
+    pub(crate) fn cached_map(&self) -> &StyleMap {
         &self.cache.as_ref().expect("resolve fills the cache").map
     }
 

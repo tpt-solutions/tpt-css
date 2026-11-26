@@ -87,8 +87,8 @@ fn the_same_resolver_gives_the_same_styles_on_both_tree_shapes() {
 
     let mut resolver = StyleResolver::new(ResolverConfig::default());
     resolver.add_stylesheet(common::parse_sheet(CSS).stylesheet, Origin::Author);
-    let app_map = resolver.resolve(&app, &Environment::default());
-    let dom_map = resolver.resolve(&dom, &Environment::default());
+    let app_map = resolver.resolve(&app, &Environment::default()).clone();
+    let dom_map = resolver.resolve(&dom, &Environment::default()).clone();
 
     for (a, d) in app_nodes.iter().zip(dom_nodes.iter()) {
         assert_eq!(
@@ -109,28 +109,28 @@ fn expected_values_on_the_appfront_tree() {
     let [_root, panel, label, button] = [nodes[0], nodes[1], nodes[2], nodes[3]];
 
     // app: 18px, color #222 inherited by everything below it.
-    assert_eq!(style_of(&map, panel).font_size(), 18.0);
-    assert_eq!(style_of(&map, label).font_weight(), 700.0);
+    assert_eq!(style_of(map, panel).font_size(), 18.0);
+    assert_eq!(style_of(map, label).font_weight(), 700.0);
     // panel:hover turns the border on, and the 2px width applies.
     assert_eq!(
-        style_of(&map, panel).raw(lookup("border-top-width").unwrap()),
+        style_of(map, panel).raw(lookup("border-top-width").unwrap()),
         &tpt_css::values::Value::px(2.0)
     );
     // The label is not hovered, so no border is set on it.
     assert_eq!(
-        style_of(&map, label).raw(lookup("border-top-width").unwrap()),
+        style_of(map, label).raw(lookup("border-top-width").unwrap()),
         &tpt_css::values::Value::px(0.0)
     );
     // button.primary sets 1rem, which is the root's 18px.
-    assert_eq!(style_of(&map, button).font_size(), 18.0);
+    assert_eq!(style_of(map, button).font_size(), 18.0);
     // button.primary sets blue; it is the only rule for the button's color.
     assert_eq!(
-        style_of(&map, button).color(),
+        style_of(map, button).color(),
         tpt_css::values::Color::rgb8(0, 0, 255)
     );
     // panel > label sets line-height on the label.
     assert_eq!(
-        style_of(&map, label).raw(lookup("line-height").unwrap()),
+        style_of(map, label).raw(lookup("line-height").unwrap()),
         &tpt_css::values::Value::Number(1.5)
     );
 }

@@ -188,7 +188,7 @@ pub fn style_with_env(css: &str, tree: &TestTree, env: &Environment) -> StyleMap
     let mut resolver = StyleResolver::new(Default::default());
     let parsed = parse_sheet(css);
     resolver.add_stylesheet(parsed.stylesheet, Origin::Author);
-    resolver.resolve(tree, env)
+    resolver.resolve(tree, env).clone()
 }
 
 /// The computed style of `node`, panicking if the node was not styled.

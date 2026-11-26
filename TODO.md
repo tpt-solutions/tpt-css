@@ -171,7 +171,7 @@ All decisions are recorded in DESIGN.md section 2.
 - [~] Selector dependency graph (spec 12.4, 17.2). Not built. The restyle uses two conservative flags per rule: `structural` (sibling-dependent) and `needs_ancestors` (`:has()`, `:scope`, `@scope`). Each drives a wider restyle.
 - [ ] Custom property dependency graph (spec 17.2). Not started; a custom property change restyles the element it is on.
 - [~] `StyleChange` enum and `RestyleHint` (spec 17.1, 17.2). `AttributeNamed` skips an attribute that no selector reads and style does not read directly. `AttributeChanged`, which has no name, stays conservative. There is no `RestyleHint` type.
-- [~] `invalidate` and `restyle` on `StyleResolver` (spec 8.2). Done, with an equality cutoff: an element whose computed style is unchanged stops the restyle, when every rule is subject-only. `restyle` returns a reference into the cache and copies nothing.
+- [~] `invalidate` and `restyle` on `StyleResolver` (spec 8.2). Done, with an equality cutoff: an element whose computed style is unchanged stops the restyle, when every rule is subject-only. `resolve` and `restyle` return a reference into the cache and copy nothing.
 - [ ] Style sharing with safe sharing key (spec 17.3). Not started.
 - [~] `:has()` invalidation graph (spec 12.4). Conservative: any attribute change restyles everything when a `:has()` rule exists.
 - [~] Media and container query invalidation (spec 16.3, 16.5). An environment change or a container provider restyles everything. No finer tracking.
@@ -182,7 +182,7 @@ All decisions are recorded in DESIGN.md section 2.
 - [x] Devtools-facing inspection data (spec 7 `diagnostics`), via `StyleResolver::inspect`.
 - [x] Visited-link privacy policy: `VisitedPolicy` (spec 20.2).
 - [~] Web profile integration tests (`--features web`). The `web` feature enables the CSSOM tests. There is no DOM adapter, so no end-to-end web test exists.
-- [~] Acceptance: incremental restyle, no full-document restyle for simple local changes. Met for subject-only rules: a local change restyles one element (`tests/integration/perf.rs`, `tests/integration/invalidation.rs`). A one-element restyle on 10,000 elements takes about 34 µs (measured, release), since `restyle` returns a reference. `resolve` still returns an owned map, which is one copy per full resolve.
+- [~] Acceptance: incremental restyle, no full-document restyle for simple local changes. Met for subject-only rules: a local change restyles one element (`tests/integration/perf.rs`, `tests/integration/invalidation.rs`). A one-element restyle on 10,000 elements takes about 34 µs (measured, release). `resolve` and `restyle` both return a reference, so no call copies the map. Callers that keep a result clone it.
 
 ## 6. M4: long-tail web compatibility (spec 24)
 

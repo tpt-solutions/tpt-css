@@ -108,7 +108,7 @@ fn revert_rolls_back_to_the_user_agent_origin() {
     );
     let map = resolver.resolve(&t, &Environment::default());
     assert_eq!(
-        style_of(&map, child).raw(lookup("margin-left").unwrap()),
+        style_of(map, child).raw(lookup("margin-left").unwrap()),
         &px(7.0)
     );
 }

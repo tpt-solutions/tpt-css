@@ -34,7 +34,7 @@ fn resolver_for(css: &str) -> StyleResolver {
 }
 
 fn full(css: &str, tree: &TestTree, env: &Environment) -> tpt_css::StyleMap {
-    resolver_for(css).resolve(tree, env)
+    resolver_for(css).resolve(tree, env).clone()
 }
 
 #[test]
@@ -171,7 +171,7 @@ fn a_restyle_with_nothing_dirty_reuses_the_previous_result() {
     let env = Environment::default();
     let (t, _) = big_tree();
     let mut r = resolver_for(css);
-    let first = r.resolve(&t, &env);
+    let first = r.resolve(&t, &env).clone();
     let again = r.restyle(&t, &env);
     assert_eq!(first, *again);
     assert_eq!(r.last_restyle_count(), 0);

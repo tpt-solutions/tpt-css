@@ -318,8 +318,8 @@ These numbers come from the ignored tests in `tests/integration/perf.rs`, run wi
 `cargo test --release --test integration -- --ignored --nocapture`. They are
 engineering measurements, not claims about other machines (spec 21.1).
 
-- Tokenizer: about 10.4 million tokens per second.
-- Static tree of 10,000 elements: full resolve about 45 ms. A local restyle that
+- Tokenizer: about 9 to 10 million tokens per second (two runs).
+- Static tree of 10,000 elements: full resolve about 45 to 50 ms (two runs). A local restyle that
   changes one element with a subject-only rule restyles 1 element and takes about
   34 µs, since `restyle` returns a reference into the cache (decision 16). It was
   16 ms when the map was copied, and 32 ms when it was copied twice.
@@ -347,8 +347,9 @@ engineering measurements, not claims about other machines (spec 21.1).
     at 1 dppx with no contrast preference. `MediaEnvironment` is no longer `Eq`,
     because the pixel ratio is a float.
 
-16. **`restyle` returns a reference into the cache.** Nothing is copied on a
-    restyle. `resolve` still returns an owned map. A one-element local restyle on
+16. **`resolve` and `restyle` return a reference into the cache.** Neither copies the
+    map. A caller that keeps a result across a later call clones it. Before this
+    change, `resolve` copied the map on the way out. A one-element local restyle on
     10,000 elements takes about 34 µs in release, down from about 16 ms when the
     map was copied.
 17. **Relative color syntax (CSS Color 5)** works for `rgb`, `hsl`, `hwb`, `lab`,

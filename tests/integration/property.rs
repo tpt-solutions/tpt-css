@@ -147,7 +147,7 @@ fn restyling_after_random_changes_matches_a_full_resolve() {
             let restyled = resolver.restyle(&t, &env);
             let mut fresh = StyleResolver::new(ResolverConfig::default());
             fresh.add_stylesheet(parse_sheet(&css).stylesheet, Origin::Author);
-            let full = fresh.resolve(&t, &env);
+            let full = fresh.resolve(&t, &env).clone();
             assert_eq!(*restyled, full, "case {case}: incremental restyle diverged");
         }
     }

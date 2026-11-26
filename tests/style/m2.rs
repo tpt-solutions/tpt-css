@@ -248,7 +248,7 @@ fn visited_disabled_never_matches() {
         Origin::Author,
     );
     let map = resolver.resolve(&t, &Environment::default());
-    assert_eq!(style_of(&map, child).color(), Color::BLACK);
+    assert_eq!(style_of(map, child).color(), Color::BLACK);
 }
 
 #[test]
@@ -308,7 +308,7 @@ fn an_animation_origin_sheet_participates_in_the_cascade() {
         Origin::Animation,
     );
     let map = resolver.resolve(&t, &Environment::default());
-    assert_eq!(value(&map, child, "margin-left"), Value::px(8.0));
+    assert_eq!(value(map, child, "margin-left"), Value::px(8.0));
 }
 
 #[test]
