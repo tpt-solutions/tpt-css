@@ -4,9 +4,10 @@ A clean-room CSS engine in Rust. It takes CSS text through tokens, a stylesheet
 AST, selector matching, the cascade, and property parsing to computed styles,
 over any tree that implements a small `StyleTree` trait.
 
-**Status:** M0 foundation (syntax, Tier 0 selectors, cascade, 37 core properties,
-style resolution). See [TODO.md](TODO.md) for the milestone plan and
-[SPEC_TRACE.md](SPEC_TRACE.md) for what is implemented, tested, and still missing.
+**Status:** M1, practical CSS. Tier 1 selectors, pseudo-elements, custom
+properties and `var()`, `calc()`, `@media`, shorthands, and incremental restyle
+are in. Open items are in [TODO.md](TODO.md). What is implemented, tested, and
+still missing is in [SPEC_TRACE.md](SPEC_TRACE.md).
 
 ## Design
 

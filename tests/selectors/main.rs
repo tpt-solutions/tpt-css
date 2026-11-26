@@ -5,6 +5,7 @@
 
 #[path = "../common/mod.rs"]
 mod common;
+mod tier1;
 
 use common::{parse_sheet, TestTree};
 use tpt_css::ast::Rule;
@@ -99,7 +100,7 @@ fn state_pseudo_classes_use_adapter_state() {
 #[test]
 fn text_and_document_nodes_never_match() {
     let (mut t, div, _, _) = sample();
-    let text = t.text(div);
+    let text = t.add_text(div);
     assert!(!matches(&t, text, "*"));
     assert_eq!(t.kind(text), NodeKind::Text);
 }

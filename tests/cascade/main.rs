@@ -6,6 +6,7 @@
 
 #[path = "../common/mod.rs"]
 mod common;
+mod media;
 
 use common::{parse_sheet, TestTree};
 use tpt_css::cascade::order::DeclarationOrder;

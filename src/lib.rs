@@ -29,12 +29,14 @@ pub mod tree;
 pub mod values;
 
 pub use cascade::origin::Origin;
-pub use env::Environment;
+pub use env::{Environment, MediaEnvironment, MediaKind, ViewportInfo};
 pub use limits::ParseLimits;
 pub use parse::{
     parse_declaration_list, parse_stylesheet, Diagnostic, DiagnosticCode, ParseOptions,
     ParsedStylesheet, Severity,
 };
 pub use style::computed::{ComputedStyle, StyleMap};
+pub use style::custom::CustomPropertyValue;
+pub use style::invalidation::StyleChange;
 pub use style::resolver::{ResolverConfig, SheetId, StyleResolver};
 pub use tree::contract::StyleTree;

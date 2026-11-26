@@ -5,16 +5,20 @@
 
 use super::declarations::parse_block_contents;
 use super::diagnostics::{Diagnostic, DiagnosticCode};
+use super::media::parse_media_queries;
 use super::selectors::{parse_selector_list, span_of};
-use crate::ast::{DeclarationBlock, Rule, StyleRule, UnknownAtRule};
+use crate::ast::{DeclarationBlock, MediaRule, Rule, StyleRule, UnknownAtRule};
 use crate::limits::ParseLimits;
 use crate::syntax::{trim_whitespace, BlockKind, ComponentValue, Span, Token, TokenKind};
 
-/// Consumes a top-level list of rules.
+const MEDIA_URL: &str = "https://www.w3.org/TR/mediaqueries-5/";
+
+/// Consumes a list of rules. `depth` counts nested `@media` blocks.
 pub(crate) fn consume_rule_list(
     values: &[ComponentValue],
     limits: &ParseLimits,
     diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
 ) -> Vec<Rule> {
     let mut rules = Vec::new();
     let mut i = 0;
@@ -38,15 +42,21 @@ pub(crate) fn consume_rule_list(
             ..
         }) = v
         {
-            let (rule, next) = consume_at_rule(values, i, name);
+            let (at, next) = consume_at_rule(values, i, name);
+            i = next;
+            if at.name.eq_ignore_ascii_case("media") {
+                if let Some(rule) = media_rule(at, limits, diagnostics, depth) {
+                    rules.push(Rule::Media(rule));
+                }
+                continue;
+            }
             diagnostics.push(Diagnostic::error(
                 DiagnosticCode::UnsupportedAtRule,
-                rule.span,
-                format!("@{} is not supported yet; preserved but ignored", rule.name),
+                at.span,
+                format!("@{} is not supported yet; preserved but ignored", at.name),
                 None,
             ));
-            rules.push(Rule::Unknown(rule));
-            i = next;
+            rules.push(Rule::Unknown(at));
             continue;
         }
         let (rule, next) = consume_qualified_rule(values, i, limits, diagnostics);
@@ -56,6 +66,51 @@ pub(crate) fn consume_rule_list(
         i = next;
     }
     rules
+}
+
+/// Builds an `@media` rule from a consumed at-rule. Returns `None`, with a
+/// diagnostic, if the block is missing, the prelude is malformed, or nesting is
+/// too deep.
+fn media_rule(
+    at: UnknownAtRule,
+    limits: &ParseLimits,
+    diagnostics: &mut Vec<Diagnostic>,
+    depth: usize,
+) -> Option<MediaRule> {
+    let block = match at.block {
+        Some(block) => block,
+        None => {
+            diagnostics.push(Diagnostic::error(
+                DiagnosticCode::InvalidSelector,
+                at.span,
+                "@media needs a { } block; dropped",
+                Some(MEDIA_URL),
+            ));
+            return None;
+        }
+    };
+    if depth + 1 > limits.max_nesting_depth {
+        diagnostics.push(Diagnostic::error(
+            DiagnosticCode::LimitExceeded,
+            at.span,
+            "@media nesting limit exceeded; dropped",
+            None,
+        ));
+        return None;
+    }
+    let queries = match parse_media_queries(&at.prelude) {
+        Ok(q) => q,
+        Err(diag) => {
+            diagnostics.push(diag);
+            return None;
+        }
+    };
+    let rules = consume_rule_list(&block, limits, diagnostics, depth + 1);
+    Some(MediaRule {
+        queries,
+        rules,
+        span: at.span,
+    })
 }
 
 /// Consumes an at-rule that starts at `start`. Ends at `;` or at a `{}` block.

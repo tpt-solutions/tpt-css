@@ -5,7 +5,7 @@
 //! in M1; only the identity type is defined here so node kinds can name them.
 
 /// A pseudo-element.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PseudoElement {
     /// `::before`
     Before,

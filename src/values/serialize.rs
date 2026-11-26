@@ -7,19 +7,15 @@
 //! yet spec-exact CSSOM serialization (M3, spec 25.8). Colors are written in
 //! the legacy `rgb()` and `rgba()` forms with 8-bit channels.
 
-use super::{color::Color, LengthUnit, Value};
+use super::calc;
+use super::{color::Color, Value};
 
 /// Serializes a value in canonical form.
 pub fn serialize_value(value: &Value) -> String {
     match value {
         Value::Keyword(k) => (*k).to_string(),
         Value::Length { value, unit } => {
-            let unit = match unit {
-                LengthUnit::Px => "px",
-                LengthUnit::Em => "em",
-                LengthUnit::Rem => "rem",
-            };
-            format!("{}{}", format_number(*value), unit)
+            format!("{}{}", format_number(*value), calc::unit_name(*unit))
         }
         Value::Percentage(p) => format!("{}%", format_number(*p)),
         Value::Number(n) => format_number(*n),
@@ -35,6 +31,12 @@ pub fn serialize_value(value: &Value) -> String {
             })
             .collect::<Vec<_>>()
             .join(", "),
+        Value::Strings(list) => list
+            .iter()
+            .map(|s| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")))
+            .collect::<Vec<_>>()
+            .join(" "),
+        Value::Calc(node) => calc::serialize(node),
     }
 }
 

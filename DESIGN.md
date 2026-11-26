@@ -123,3 +123,68 @@ in the module listed here.
 | Abstract tree contract | `src/tree/` |
 | Environment | `src/env/mod.rs` |
 | Resource limits | `src/limits.rs` |
+
+## 6. M1 decisions and deviations
+
+M1 adds Tier 1 selectors, units and math functions, custom properties and
+`var()`, shorthands, `@media`, pseudo-element styles, the M1 property set, and
+the invalidation foundation. Section 4 lists the M0 gaps; the list below replaces
+it for M1.
+
+### Decisions
+
+1. **Pseudo-elements are side tables.** `StyleMap::get_pseudo` looks up a
+   `(node, pseudo)` key. A pseudo-element is generated only when its `content` is
+   not `none` or `normal`. This resolves spec 25.4 in favor of side tables.
+2. **Custom properties are resolved per element at computed-value time.** Each
+   custom property is resolved with a memo and a stack of names in progress. A
+   cycle makes every property in it invalid. An invalid or missing property is
+   absent from the element's map, so a `var()` that reads it uses its fallback.
+3. **`var()` is substituted before parsing.** A declaration that contains `var()`
+   is kept as tokens and parsed after substitution. For a shorthand, the whole
+   value is kept, expanded after substitution, and each longhand takes its own
+   part. This follows the pending-substitution approach of spec 15.3.
+4. **Shorthands are expanded before the cascade.** Each longhand then competes
+   on its own. A shorthand reset (for example a `border` without a color) sets
+   the missing longhands to their initial values.
+5. **Math functions keep units until computed time.** The parser type-checks each
+   expression (`10px + 2` is invalid). At computed time, lengths become px and
+   linear forms collapse to `Linear { px, percent }`. Percentages stay symbolic
+   for layout, except in `font-size`.
+6. **Non-negative clamping waits for percentages.** `calc(50% - 10px)` on a
+   non-negative property keeps its negative px part, because layout resolves the
+   percentage first.
+7. **Media conditions are evaluated per resolve call.** `active_rules` computes
+   one boolean per rule. Matching then runs only for active rules. Unknown
+   features never match, and `not` inverts the whole query.
+8. **Invalidation is conservative.** Attribute, state, and inline changes restyle
+   the changed element and its subtree. If any rule depends on sibling structure,
+   the parent's subtree is also restyled, which covers every sibling. Stylesheet
+   and tree changes restyle everything. A precise dependency index is M3 work.
+9. **`restyle` returns a copy of the cached map.** This keeps the API of spec 8.2
+   at the cost of one clone per call. A shared map is M3 work.
+10. **`StyleTree::text` has a default.** Adapters that do not supply text get the
+    empty string, so `:empty` treats them as empty.
+
+### Deviations and limits
+
+- `calc()` nesting uses a fixed `DEFAULT_CALC_DEPTH` (32), not a `ParseLimits`
+  field. Making it configurable is a small follow-up.
+- `content` accepts strings only. `attr()` and counters are not supported.
+- `background` covers only `background-color`. A declaration with an image is
+  dropped. `font`, `list-style`, and `text-decoration` are not implemented.
+- Named colors are still the 16 basic colors plus `orange`.
+  `lab()`, `lch()`, `oklab()`, `oklch()`, and `color-mix()` are not implemented.
+- Angle, time, and resolution units are accepted only where they matter here
+  (the hue of `hsl()` and `hwb()`).
+- Structural pseudo-classes scan the sibling list. A wide parent costs
+  O(siblings) per child, so a child list of n elements costs O(n²) in the worst
+  case. An index is M3 work.
+
+### Still not implemented at the end of M1
+
+- Shorthands `font`, `list-style`, `text-decoration`, and the full `background`.
+- Named color table (148 names), and the modern color spaces.
+- Tier 2 selectors (`:has()`, `:focus-visible`, and the rest), `@layer`,
+  `@supports`, `@container`, `@scope`, `@property`, nesting, and `revert`.
+- Precise invalidation (M3) and CSSOM (M3).

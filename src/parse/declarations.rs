@@ -109,7 +109,8 @@ fn parse_declaration(values: &[ComponentValue]) -> Result<Declaration, Diagnosti
 
     let (important, value_part) = strip_important(&values[i + 1..]);
     let value = trim_whitespace(value_part);
-    if value.is_empty() {
+    // Custom properties may have an empty value (CSS Variables 1).
+    if value.is_empty() && !name.starts_with("--") {
         return Err(invalid(span, "declaration has no value"));
     }
 

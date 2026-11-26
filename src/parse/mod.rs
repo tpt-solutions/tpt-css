@@ -8,6 +8,7 @@
 
 pub mod declarations;
 pub mod diagnostics;
+pub(crate) mod media;
 pub mod rules;
 pub mod selectors;
 pub mod stylesheet;

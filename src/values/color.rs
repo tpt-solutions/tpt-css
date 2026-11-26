@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Copyright (c) 2026 TPT Solutions
 
-//! Colors (spec 14.5, Tier 0): a subset of named colors, `transparent`,
-//! `#rgb`, `#rrggbb`, `rgb()`, and `rgba()`.
+//! Colors (spec 14.5). Supported: `transparent`, a subset of named colors,
+//! `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()`, `rgba()`, `hsl()`,
+//! `hsla()`, and `hwb()`.
 //!
-//! Gaps for M0 (recorded in SPEC_TRACE.md): the named color table has only the
-//! 16 basic colors and `orange`, the full 148-name table is pending; `#rgba`
-//! and `#rrggbbaa` are M1; `currentcolor` is resolved by the property layer,
-//! not here.
+//! Gaps (recorded in SPEC_TRACE.md): the named color table has only the 16
+//! basic colors and `orange`, and the full 148-name table is pending.
+//! `lab()`, `lch()`, `oklab()`, `oklch()`, and `color-mix()` are not
+//! implemented. `currentcolor` is resolved by the property layer, not here.
 
 use crate::syntax::{trim_whitespace, ComponentValue, TokenKind};
 
@@ -105,38 +106,185 @@ pub fn parse_color(values: &[ComponentValue]) -> Option<Color> {
             TokenKind::Hash { value, .. } => parse_hex(value),
             _ => None,
         },
-        ComponentValue::Function(f) => {
-            let name = f.name.to_ascii_lowercase();
-            if name == "rgb" || name == "rgba" {
-                parse_rgb_arguments(&f.value)
-            } else {
-                None
-            }
-        }
+        ComponentValue::Function(f) => match f.name.to_ascii_lowercase().as_str() {
+            "rgb" | "rgba" => parse_rgb_arguments(&f.value),
+            "hsl" | "hsla" => parse_hsl(&f.value),
+            "hwb" => parse_hwb(&f.value),
+            _ => None,
+        },
         _ => None,
     }
 }
 
-/// `#rgb` or `#rrggbb`. Digits are hexadecimal; anything else is rejected.
+/// `#rgb`, `#rgba`, `#rrggbb`, or `#rrggbbaa`. Digits are hexadecimal;
+/// anything else is rejected.
 fn parse_hex(digits: &str) -> Option<Color> {
     if !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
     }
     let nibble = |c: char| c.to_digit(16).map(|d| d as u8);
     let chars: Vec<char> = digits.chars().collect();
+    let byte = |i: usize| Some(nibble(chars[i])? * 16 + nibble(chars[i + 1])?);
     match chars.len() {
-        3 => {
+        3 | 4 => {
             let r = nibble(chars[0])? * 17;
             let g = nibble(chars[1])? * 17;
             let b = nibble(chars[2])? * 17;
-            Some(Color::rgb8(r, g, b))
+            let a = if chars.len() == 4 {
+                f32::from(nibble(chars[3])? * 17) / 255.0
+            } else {
+                1.0
+            };
+            Some(with_alpha(Color::rgb8(r, g, b), a))
         }
-        6 => {
-            let byte = |i: usize| Some(nibble(chars[i])? * 16 + nibble(chars[i + 1])?);
-            Some(Color::rgb8(byte(0)?, byte(2)?, byte(4)?))
+        6 | 8 => {
+            let a = if chars.len() == 8 {
+                f32::from(byte(6)?) / 255.0
+            } else {
+                1.0
+            };
+            Some(with_alpha(Color::rgb8(byte(0)?, byte(2)?, byte(4)?), a))
         }
         _ => None,
     }
+}
+
+fn with_alpha(color: Color, alpha: f32) -> Color {
+    Color { alpha, ..color }
+}
+
+/// A hue angle in degrees: a number (degrees), or `deg`, `grad`, `rad`, or `turn`.
+fn hue_degrees(v: &ComponentValue) -> Option<f64> {
+    match v {
+        ComponentValue::Token(t) => match &t.kind {
+            TokenKind::Number { value, .. } => Some(*value),
+            TokenKind::Dimension { value, unit, .. } => match unit.to_ascii_lowercase().as_str() {
+                "deg" => Some(*value),
+                "grad" => Some(*value * 0.9),
+                "rad" => Some(*value * 180.0 / std::f64::consts::PI),
+                "turn" => Some(*value * 360.0),
+                _ => None,
+            },
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A saturation, lightness, or whiteness/blackness value in `[0, 1]`:
+/// a percentage, or a number read as a percentage (CSS Color 4 legacy form).
+fn unit_interval(v: &ComponentValue) -> Option<f64> {
+    match as_arg(v)? {
+        Arg::Percent(p) => Some((p / 100.0).clamp(0.0, 1.0)),
+        Arg::Number(n) => Some((n / 100.0).clamp(0.0, 1.0)),
+    }
+}
+
+/// Splits `hsl()`/`hwb()` arguments into three components and an optional alpha.
+fn hsl_parts(
+    args: &[ComponentValue],
+) -> Option<(
+    &ComponentValue,
+    &ComponentValue,
+    &ComponentValue,
+    Option<Arg>,
+)> {
+    let args = trim_whitespace(args);
+    let has_comma = args.iter().any(|v| v.is_token(&TokenKind::Comma));
+    let items: Vec<&ComponentValue> = if has_comma {
+        let parts = crate::parse::split_on(args, |v| v.is_token(&TokenKind::Comma));
+        let mut out = Vec::new();
+        for part in parts {
+            let part = trim_whitespace(part);
+            let [only] = part else {
+                return None;
+            };
+            out.push(only);
+        }
+        out
+    } else {
+        args.iter().filter(|v| !v.is_whitespace()).collect()
+    };
+    match items.as_slice() {
+        [h, s, l] => Some((h, s, l, None)),
+        [h, s, l, a] if has_comma => Some((h, s, l, Some(as_arg(a)?))),
+        [h, s, l, slash, a] if slash.is_token(&TokenKind::Delim('/')) => {
+            Some((h, s, l, Some(as_arg(a)?)))
+        }
+        _ => None,
+    }
+}
+
+fn alpha_of(alpha: Option<Arg>) -> f32 {
+    match alpha {
+        None => 1.0,
+        Some(Arg::Number(n)) => n.clamp(0.0, 1.0) as f32,
+        Some(Arg::Percent(p)) => (p / 100.0).clamp(0.0, 1.0) as f32,
+    }
+}
+
+/// `hsl(h s l [/ a])` and `hsla(h, s, l[, a])` (CSS Color 4 section 7.1).
+fn parse_hsl(args: &[ComponentValue]) -> Option<Color> {
+    let (h, s, l, alpha) = hsl_parts(args)?;
+    let hue = hue_degrees(h)?.rem_euclid(360.0);
+    let sat = unit_interval(s)?;
+    let light = unit_interval(l)?;
+    let [r, g, b] = hsl_to_rgb(hue, sat, light);
+    Some(with_alpha(
+        Color {
+            space: ColorSpace::Srgb,
+            components: [r as f32, g as f32, b as f32],
+            alpha: 1.0,
+        },
+        alpha_of(alpha),
+    ))
+}
+
+/// `hwb(h w b [/ a])` (CSS Color 4 section 7.2).
+fn parse_hwb(args: &[ComponentValue]) -> Option<Color> {
+    let (h, w, bl, alpha) = hsl_parts(args)?;
+    let hue = hue_degrees(h)?.rem_euclid(360.0);
+    let white = unit_interval(w)?;
+    let black = unit_interval(bl)?;
+    if white + black >= 1.0 {
+        // Whiteness and blackness fill the whole range: the result is gray.
+        let gray = (white / (white + black)) as f32;
+        return Some(with_alpha(
+            Color {
+                space: ColorSpace::Srgb,
+                components: [gray; 3],
+                alpha: 1.0,
+            },
+            alpha_of(alpha),
+        ));
+    }
+    let [r, g, b] = hsl_to_rgb(hue, 1.0, 0.5);
+    let mix = |c: f64| c * (1.0 - white - black) + white;
+    Some(with_alpha(
+        Color {
+            space: ColorSpace::Srgb,
+            components: [mix(r) as f32, mix(g) as f32, mix(b) as f32],
+            alpha: 1.0,
+        },
+        alpha_of(alpha),
+    ))
+}
+
+/// HSL to sRGB in `[0, 1]`. `hue` in degrees, `sat` and `light` in `[0, 1]`.
+fn hsl_to_rgb(hue: f64, sat: f64, light: f64) -> [f64; 3] {
+    let c = (1.0 - (2.0 * light - 1.0).abs()) * sat;
+    let hp = hue / 60.0;
+    let x = c * (1.0 - ((hp % 2.0) - 1.0).abs());
+    let (r1, g1, b1) = match hp as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = light - c / 2.0;
+    [r1 + m, g1 + m, b1 + m]
 }
 
 /// A channel or alpha argument: a number or a percentage.

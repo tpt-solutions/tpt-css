@@ -1,0 +1,15 @@
+/* Own MIT fixture (spec 22.2), written from spec behavior. Uses M1 features. */
+:root { --accent: #1a73e8; --gap: 8px; font-size: 16px }
+body { font-family: "Helvetica Neue", sans-serif; color: #222; margin: 0 }
+nav > a { color: var(--accent); padding: var(--gap) calc(2 * var(--gap)) }
+nav a:first-child { font-weight: bold }
+main article:nth-child(odd) { background-color: #f5f5f5 }
+main article p + p { margin-top: calc(var(--gap) / 2) }
+main p:empty { display: none }
+article::before { content: "§"; color: var(--accent) }
+@media (max-width: 600px) {
+  nav > a { padding: 4px }
+}
+@media print {
+  nav { display: none }
+}

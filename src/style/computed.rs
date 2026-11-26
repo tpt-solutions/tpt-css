@@ -3,31 +3,56 @@
 
 //! Computed styles and the style map (spec 8.3, 14, 16.1).
 //!
-//! Storage is property-id based: one `Value` per registry row. Typed accessors
-//! are conveniences over that storage.
+//! Storage is property-id based: one `Value` per registry row, plus the
+//! element's resolved custom properties. Typed accessors are conveniences over
+//! that storage.
 
 use std::collections::BTreeMap;
 
 use crate::properties::registry::{ids, Grammar, PropertyId, PROPERTIES};
+use crate::selectors::PseudoElement;
+use crate::style::custom::CustomPropertyValue;
 use crate::tree::NodeId;
+use crate::values::calc::{self, CalcNode};
 use crate::values::{Color, LengthUnit, Value};
 
-/// Computed values of one element, indexed by property id.
+/// Computed values of one element.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComputedStyle {
     values: Vec<Value>,
+    custom: BTreeMap<String, CustomPropertyValue>,
 }
 
 impl ComputedStyle {
-    /// Builds a style from one value per property, in registry order.
-    pub(crate) fn from_values(values: Vec<Value>) -> ComputedStyle {
+    /// Builds a style from one value per property, in registry order, and the
+    /// resolved custom properties.
+    pub(crate) fn from_values(
+        values: Vec<Value>,
+        custom: BTreeMap<String, CustomPropertyValue>,
+    ) -> ComputedStyle {
         debug_assert_eq!(values.len(), PROPERTIES.len());
-        ComputedStyle { values }
+        ComputedStyle { values, custom }
     }
 
     /// The computed value of a property.
     pub fn raw(&self, id: PropertyId) -> &Value {
         &self.values[id.index()]
+    }
+
+    /// The resolved custom property `name` (for example `--gap`), if it is
+    /// defined and valid.
+    pub fn custom_property(&self, name: &str) -> Option<&CustomPropertyValue> {
+        self.custom.get(name)
+    }
+
+    /// All resolved custom properties, in name order.
+    pub fn custom_properties(&self) -> impl Iterator<Item = (&str, &CustomPropertyValue)> {
+        self.custom.iter().map(|(k, v)| (k.as_str(), v))
+    }
+
+    /// The resolved custom properties, for inheritance by children.
+    pub(crate) fn customs(&self) -> &BTreeMap<String, CustomPropertyValue> {
+        &self.custom
     }
 
     /// The `display` keyword.
@@ -69,7 +94,7 @@ impl ComputedStyle {
 /// Context needed to compute one property (spec 16.1, step 10).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ComputeContext {
-    /// Font size of the parent, in px. Base for `em` in `font-size`.
+    /// Font size of the parent, in px. Base for `em` and `%` in `font-size`.
     pub parent_font_size: f64,
     /// Font size of the root element, in px. Base for `rem`.
     pub root_font_size: f64,
@@ -81,14 +106,51 @@ pub(crate) struct ComputeContext {
     pub color: Color,
     /// Parent's computed font weight. Base for `bolder` and `lighter`.
     pub parent_weight: f64,
+    /// Viewport width in px, for `vw`, `vmin`, and `vmax`.
+    pub viewport_width: f64,
+    /// Viewport height in px, for `vh`, `vmin`, and `vmax`.
+    pub viewport_height: f64,
 }
 
-/// Computes one value (spec 16.1 step 10, CSS Values 4 for the
-/// absolute-length rules).
+impl ComputeContext {
+    /// Converts a length to px in this context.
+    fn to_px(self, value: f64, unit: LengthUnit) -> f64 {
+        let (w, h) = (self.viewport_width, self.viewport_height);
+        match unit {
+            LengthUnit::Px => value,
+            LengthUnit::Em => value * self.font_size,
+            LengthUnit::Rem => value * self.root_font_size,
+            LengthUnit::Vw => value * w / 100.0,
+            LengthUnit::Vh => value * h / 100.0,
+            LengthUnit::Vmin => value * w.min(h) / 100.0,
+            LengthUnit::Vmax => value * w.max(h) / 100.0,
+            // 96 CSS px per inch (CSS Values 3, absolute lengths).
+            LengthUnit::In => value * 96.0,
+            LengthUnit::Cm => value * 96.0 / 2.54,
+            LengthUnit::Mm => value * 96.0 / 25.4,
+            LengthUnit::Q => value * 96.0 / 101.6,
+            LengthUnit::Pt => value * 96.0 / 72.0,
+            LengthUnit::Pc => value * 16.0,
+        }
+    }
+}
+
+/// Whether a property's grammar rejects negative values.
+fn non_negative(grammar: Grammar) -> bool {
+    match grammar {
+        Grammar::LengthPercentage { non_negative, .. } => non_negative,
+        Grammar::BorderWidth | Grammar::LineHeight => true,
+        _ => false,
+    }
+}
+
+/// Computes one value (spec 16.1 step 10, CSS Values 4 for the absolute-length
+/// rules).
 ///
-/// - `em` and `rem` become px. `font-size` percentages and `em` use the parent
-///   size, other properties use this element's font size.
-/// - Other percentages are kept for layout to resolve (spec 4.4).
+/// - Lengths and math functions become px. `font-size` percentages and `em`
+///   use the parent size, other properties use this element's font size.
+/// - Other percentages are kept for layout to resolve (spec 4.4). Math
+///   functions that mix px and percent stay as trees for the same reason.
 /// - `currentcolor` becomes a color. In `color` itself it means the inherited color.
 /// - Font weight keywords become numbers.
 pub(crate) fn compute_value(
@@ -98,23 +160,19 @@ pub(crate) fn compute_value(
     ctx: &ComputeContext,
 ) -> Value {
     let is_font_size = id == ids::FONT_SIZE;
-    match value {
-        Value::Length { value, unit } => {
-            let px = match unit {
-                LengthUnit::Px => value,
-                LengthUnit::Em => {
-                    let base = if is_font_size {
-                        ctx.parent_font_size
-                    } else {
-                        ctx.font_size
-                    };
-                    value * base
-                }
-                LengthUnit::Rem => value * ctx.root_font_size,
-            };
-            Value::px(finite(px))
+    let clamp_px = |px: f64| {
+        if non_negative(grammar) && px < 0.0 {
+            0.0
+        } else {
+            finite(px)
         }
-        Value::Percentage(p) if is_font_size => Value::px(finite(ctx.parent_font_size * p / 100.0)),
+    };
+    match value {
+        Value::Length { value, unit } => Value::px(clamp_px(ctx.to_px(value, unit))),
+        Value::Percentage(p) if is_font_size => {
+            Value::px(clamp_px(ctx.parent_font_size * p / 100.0))
+        }
+        Value::Calc(node) => compute_calc(&node, ctx, is_font_size, non_negative(grammar)),
         Value::Keyword("currentcolor") if matches!(grammar, Grammar::Color) => {
             let c = if id == ids::COLOR {
                 ctx.parent_color
@@ -134,11 +192,37 @@ pub(crate) fn compute_value(
     }
 }
 
-/// Keeps computed absolute lengths finite. Inheritance can compound `em`
-/// across a deep tree (`2em` at every level overflows to infinity), and an
-/// infinite length would leak into layout. NaN becomes 0 and infinities clamp
-/// to the largest finite value. This is a deliberate deviation for hostile
-/// input (spec 19.1, 20.3).
+/// Simplifies a math expression at computed-value time (spec 14.4).
+fn compute_calc(node: &CalcNode, ctx: &ComputeContext, is_font_size: bool, non_neg: bool) -> Value {
+    let to_px = |v: f64, u: LengthUnit| ctx.to_px(v, u);
+    let percent_base = is_font_size.then_some(ctx.parent_font_size);
+    match calc::simplify(node, &to_px, percent_base) {
+        CalcNode::Linear { px, percent } => {
+            // The non-negative clamp applies to the final value. A percentage is
+            // resolved later by layout, so the clamp waits for that step.
+            let px = if non_neg && percent == 0.0 && px < 0.0 {
+                0.0
+            } else {
+                finite(px)
+            };
+            match (px == 0.0, percent == 0.0) {
+                (_, true) => Value::px(px),
+                (true, false) => Value::Percentage(percent),
+                (false, false) => Value::Calc(Box::new(CalcNode::Linear { px, percent })),
+            }
+        }
+        // The parser only accepts length-typed expressions, so a bare number
+        // cannot reach here. Treat it as an invalid zero length if it does.
+        CalcNode::Number(_) => Value::px(0.0),
+        tree => Value::Calc(Box::new(tree)),
+    }
+}
+
+/// Keeps computed absolute lengths finite. Inheritance can compound `em` across
+/// a deep tree (`2em` at every level overflows to infinity), and an infinite
+/// length would leak into layout. NaN becomes 0 and infinities clamp to
+/// `f64::MAX`. This is a deliberate deviation for hostile input (spec 19.1,
+/// 20.3).
 fn finite(x: f64) -> f64 {
     if x.is_nan() {
         0.0
@@ -148,7 +232,8 @@ fn finite(x: f64) -> f64 {
 }
 
 /// `bolder` relative to the parent weight (CSS Fonts 4, relative font weights).
-/// Thresholds were written from CSS Fonts 4 and are not yet verified against the text (see SPEC_TRACE.md).
+/// Thresholds were written from CSS Fonts 4 and are not yet verified against
+/// the text (see SPEC_TRACE.md).
 fn bolder(parent: f64) -> f64 {
     if parent < 350.0 {
         400.0
@@ -170,18 +255,33 @@ fn lighter(parent: f64) -> f64 {
     }
 }
 
-/// Computed styles for every element in a resolved tree.
+/// Computed styles for every element in a resolved tree, plus the styles of
+/// generated pseudo-elements.
 ///
-/// Backed by a `BTreeMap` so iteration order depends only on node ids (spec 21.3).
+/// Backed by `BTreeMap`s so iteration order depends only on node ids and
+/// pseudo-element names (spec 21.3).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StyleMap {
     styles: BTreeMap<NodeId, ComputedStyle>,
+    pseudo: BTreeMap<(NodeId, PseudoElement), ComputedStyle>,
 }
 
 impl StyleMap {
     /// The computed style of an element, if it was resolved.
     pub fn get(&self, node: NodeId) -> Option<&ComputedStyle> {
         self.styles.get(&node)
+    }
+
+    /// The computed style of a generated pseudo-element of `node`. Present only
+    /// when the pseudo-element is generated, that is, when its `content` is not
+    /// `none` or `normal`.
+    pub fn get_pseudo(&self, node: NodeId, pseudo: &PseudoElement) -> Option<&ComputedStyle> {
+        self.pseudo.get(&(node, pseudo.clone()))
+    }
+
+    /// The resolved custom property `name` on `node`, if defined and valid.
+    pub fn custom_property(&self, node: NodeId, name: &str) -> Option<&CustomPropertyValue> {
+        self.get(node)?.custom_property(name)
     }
 
     /// Number of styled elements.
@@ -196,5 +296,19 @@ impl StyleMap {
 
     pub(crate) fn insert(&mut self, node: NodeId, style: ComputedStyle) {
         self.styles.insert(node, style);
+    }
+
+    pub(crate) fn insert_pseudo(
+        &mut self,
+        node: NodeId,
+        pseudo: PseudoElement,
+        style: ComputedStyle,
+    ) {
+        self.pseudo.insert((node, pseudo), style);
+    }
+
+    /// Removes the pseudo-element styles of `node`, before it is restyled.
+    pub(crate) fn clear_pseudo(&mut self, node: NodeId) {
+        self.pseudo.retain(|(n, _), _| *n != node);
     }
 }

@@ -61,6 +61,11 @@ pub trait StyleTree {
         ShadowInfo::default()
     }
 
+    /// Character data of a text node. Empty for other kinds. Used by `:empty`.
+    fn text(&self, _node: NodeId) -> &str {
+        ""
+    }
+
     /// Language of the node, if known. Used by `:lang()` in M1.
     fn language(&self, _node: NodeId) -> Option<&str> {
         None

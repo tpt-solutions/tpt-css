@@ -6,6 +6,7 @@
 
 #[path = "../common/mod.rs"]
 mod common;
+mod m1;
 
 use common::{style_of, style_with, TestTree};
 use tpt_css::properties::ids;
@@ -217,7 +218,7 @@ fn invalid_values_are_dropped_and_the_cascade_falls_back() {
 fn text_nodes_and_document_roots_do_not_get_styles() {
     let mut t = TestTree::new(NodeKind::Document);
     let html = t.element(t.root(), "html");
-    let text = t.text(html);
+    let text = t.add_text(html);
     let map = style_with("", &t);
     assert!(map.get(text).is_none());
     assert!(map.get(html).is_some());
@@ -246,7 +247,7 @@ fn parse_value(prop: &str, css_value: &str) -> Option<Value> {
 
 #[test]
 fn registry_has_37_properties_and_ids_match_their_rows() {
-    assert_eq!(PROPERTIES.len(), 37);
+    assert_eq!(PROPERTIES.len(), 50);
     assert_eq!(PROPERTIES[ids::DISPLAY.index()].name, "display");
     assert_eq!(PROPERTIES[ids::COLOR.index()].name, "color");
     assert_eq!(PROPERTIES[ids::FONT_FAMILY.index()].name, "font-family");
@@ -279,9 +280,9 @@ fn length_grammar_accepts_px_em_rem_percent_and_unitless_zero() {
 #[test]
 fn length_grammar_rejects_unknown_units_and_bad_numbers() {
     assert_eq!(
-        parse_value("width", "10vw"),
+        parse_value("width", "10ch"),
         None,
-        "Tier 1 units are not supported yet"
+        "units outside the supported list are rejected"
     );
     assert_eq!(
         parse_value("width", "5"),

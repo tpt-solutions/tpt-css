@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Copyright (c) 2026 TPT Solutions
 
-//! Selector AST (spec 12.1). M0 covers Tier 0 selectors plus `:root`,
-//! `:hover`, `:active`, `:focus`, and the descendant and child combinators.
+//! Selector AST (spec 12.1). M1 covers Tier 0 and Tier 1 selectors, the
+//! sibling combinators, and the pseudo-elements `::before`, `::after`,
+//! `::marker`, and `::placeholder`.
 
+use crate::selectors::pseudo::PseudoElement;
 use crate::selectors::specificity::Specificity;
 use crate::syntax::Span;
+use crate::tree::Direction;
 
 /// A selector list: `a, b c`.
 #[derive(Debug, Clone, PartialEq)]
@@ -14,7 +17,8 @@ pub struct SelectorList {
     pub selectors: Vec<ComplexSelector>,
 }
 
-/// A complex selector: compound selectors joined by combinators.
+/// A complex selector: compound selectors joined by combinators, optionally
+/// ending in a pseudo-element.
 ///
 /// Invariant: `combinators.len() + 1 == compounds.len()`.
 #[derive(Debug, Clone, PartialEq)]
@@ -23,6 +27,8 @@ pub struct ComplexSelector {
     pub compounds: Vec<CompoundSelector>,
     /// Combinator between `compounds[i]` and `compounds[i + 1]`.
     pub combinators: Vec<Combinator>,
+    /// Pseudo-element this selector targets, if any (spec 12.5).
+    pub pseudo_element: Option<PseudoElement>,
     /// Specificity computed at parse time (spec 12.3).
     pub specificity: Specificity,
     /// Source span of the whole selector.
@@ -36,13 +42,17 @@ pub struct CompoundSelector {
     pub simple: Vec<SimpleSelector>,
 }
 
-/// Combinators supported in M0 (spec 12.1).
+/// Combinators (spec 12.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Combinator {
     /// Whitespace: some ancestor.
     Descendant,
     /// `>`: the parent.
     Child,
+    /// `+`: the previous element sibling.
+    NextSibling,
+    /// `~`: any previous element sibling.
+    SubsequentSibling,
 }
 
 /// A simple selector.
@@ -56,10 +66,39 @@ pub enum SimpleSelector {
     Id(String),
     /// `.class`
     Class(String),
-    /// `[attr]` or `[attr=value]`
+    /// `[attr]`, `[attr=value]`, and the other attribute operators.
     Attribute(AttributeSelector),
-    /// `:name`
+    /// A state or structural pseudo-class with no arguments.
     PseudoClass(PseudoClass),
+    /// `:nth-child()`, `:nth-last-child()`, `:nth-of-type()`,
+    /// `:nth-last-of-type()`, and the forms that expand to them
+    /// (`:first-child`, `:last-of-type`, and so on).
+    Nth(NthSelector),
+    /// `:not(list)`
+    Not(SelectorList),
+    /// `:is(list)`
+    Is(SelectorList),
+    /// `:where(list)`
+    Where(SelectorList),
+    /// `:lang(tag)`
+    Lang(String),
+    /// `:dir(ltr | rtl)`
+    Dir(Direction),
+}
+
+/// The `An+B` family of structural selectors.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NthSelector {
+    /// Step `A`.
+    pub a: i64,
+    /// Offset `B`.
+    pub b: i64,
+    /// Count only siblings with the same name (`-of-type` forms).
+    pub of_type: bool,
+    /// Count from the end (`-last-` forms).
+    pub last: bool,
+    /// `of S` filter for `:nth-child`. Matches only siblings that match `S`.
+    pub of: Option<SelectorList>,
 }
 
 /// An attribute selector.
@@ -67,27 +106,37 @@ pub enum SimpleSelector {
 pub struct AttributeSelector {
     /// Attribute name as written.
     pub name: String,
-    /// Optional operator and value. M0 supports only `=`.
+    /// Optional operator and value.
     pub matcher: Option<AttributeMatcher>,
 }
 
 /// The matcher of an attribute selector.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AttributeMatcher {
-    /// Operator. M0 has only exact match.
+    /// Operator.
     pub operator: AttributeOperator,
     /// Expected value.
     pub value: String,
 }
 
-/// Attribute matching operators (only `=` in M0).
+/// Attribute matching operators (spec 12.2 Tier 1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttributeOperator {
     /// `=`
     Equals,
+    /// `~=`: whitespace-separated list contains the value.
+    Includes,
+    /// `|=`: equal, or starts with the value followed by `-`.
+    DashMatch,
+    /// `^=`
+    Prefix,
+    /// `$=`
+    Suffix,
+    /// `*=`
+    Substring,
 }
 
-/// Pseudo-classes supported in M0.
+/// Pseudo-classes without arguments.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PseudoClass {
     /// `:root`
@@ -98,4 +147,22 @@ pub enum PseudoClass {
     Active,
     /// `:focus` (adapter-provided state)
     Focus,
+    /// `:empty`
+    Empty,
+    /// `:enabled`
+    Enabled,
+    /// `:disabled`
+    Disabled,
+    /// `:checked`
+    Checked,
+    /// `:required`
+    Required,
+    /// `:optional`
+    Optional,
+    /// `:read-only`
+    ReadOnly,
+    /// `:read-write`
+    ReadWrite,
+    /// `:placeholder-shown`
+    PlaceholderShown,
 }

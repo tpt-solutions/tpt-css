@@ -18,7 +18,7 @@ fn style_rules(css: &str) -> Vec<tpt_css::ast::StyleRule> {
         .into_iter()
         .filter_map(|r| match r {
             Rule::Style(s) => Some(s),
-            Rule::Unknown(_) => None,
+            Rule::Unknown(_) | Rule::Media(_) => None,
         })
         .collect()
 }
@@ -93,7 +93,7 @@ fn a_rule_with_an_invalid_selector_is_dropped_and_others_survive() {
 
 #[test]
 fn unsupported_selectors_report_unsupported_not_invalid() {
-    let parsed = sheet("a::before { color: red }");
+    let parsed = sheet("a::first-line { color: red }");
     assert!(parsed
         .diagnostics
         .iter()

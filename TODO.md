@@ -124,23 +124,23 @@ All decisions are recorded in DESIGN.md section 2.
 
 ## 3. M1: practical CSS (spec 24)
 
-- [ ] Full Tier 1 selectors: attribute operators, `:first-child`, `:last-child`, `:only-child`, `:nth-*`, `:first-of-type` and related, `:empty`, `:not()`, `:is()`, `:where()`, `:lang()`, `:dir()`, form states
-- [ ] Sibling combinators `+` and `~`
-- [ ] Pseudo-elements `::before`, `::after`, `::marker`, `::placeholder` (spec 12.5)
-- [ ] `content` property
-- [ ] Custom properties with cascade (spec 13.7)
-- [ ] `var()` with fallbacks (spec 14.6)
-- [ ] Custom property cycle detection and `max_var_depth` (spec 13.7, 19.2)
-- [ ] `calc()`, `min()`, `max()`, `clamp()` with unit algebra and simplification (spec 14.4)
-- [ ] Media queries, `@media`, evaluation separate from matching (spec 16.3)
-- [ ] Remaining basic colors: `#rgba`, `#rrggbbaa`, `hsl()`, `hsla()`, `hwb()`, `lab()`, `lch()`, `oklab()`, `oklch()`, `color-mix()` (spec 14.5)
-- [ ] Tier 0 and Tier 1 units (spec 14.3)
-- [ ] Shorthands: `background`, `border`, `margin`, `padding`, `font`, `list-style`, `text-decoration`
-- [ ] M1 property set (spec 15.2)
-- [ ] Invalidation foundation (spec 17)
-- [ ] Fixtures: selector, cascade, var, calc
-- [ ] Style a nontrivial AppFront document
-- [ ] Style a static web-like fixture tree
+- [x] Full Tier 1 selectors: attribute operators, `:first-child`, `:last-child`, `:only-child`, `:nth-*`, `:first-of-type` and related, `:empty`, `:not()`, `:is()`, `:where()`, `:lang()`, `:dir()`, form states. Tests: `tests/selectors/tier1.rs`.
+- [x] Sibling combinators `+` and `~`
+- [x] Pseudo-elements `::before`, `::after`, `::marker`, `::placeholder` (spec 12.5). Styles are side tables; `StyleMap::get_pseudo`.
+- [~] `content` property. Strings, `normal`, and `none` only. `attr()` and counters are not supported.
+- [x] Custom properties with cascade (spec 13.7). Inherited; `initial` removes them.
+- [x] `var()` with fallbacks (spec 14.6)
+- [x] Custom property cycle detection and `max_var_depth` (spec 13.7, 19.2). A cycle makes its members invalid.
+- [x] `calc()`, `min()`, `max()`, `clamp()` with unit algebra and simplification (spec 14.4). Type-checked at parse time. Percentages stay symbolic except in `font-size`. Trig, `round()`, and the other M4 functions are not implemented.
+- [x] Media queries, `@media`, evaluation separate from matching (spec 16.3). Media type, `and`, `not`, lists, nesting, and the width, height, aspect-ratio, orientation, color-scheme, reduced-motion, hover, and pointer features.
+- [~] Remaining basic colors: `#rgba`, `#rrggbbaa`, `hsl()`, `hsla()`, `hwb()` done. `lab()`, `lch()`, `oklab()`, `oklch()`, and `color-mix()` are not implemented (spec 14.5).
+- [~] Tier 0 and Tier 1 units (spec 14.3). Length units (px, em, rem, vw, vh, vmin, vmax, cm, mm, Q, in, pt, pc) and percent are done. Angle, time, and resolution units are accepted only for the hue of `hsl()`/`hwb()`.
+- [~] Shorthands: `margin`, `padding`, `border` (with sides, width, style, color), `background` (color only). `font`, `list-style`, and `text-decoration` are not implemented (spec 15.3).
+- [~] M1 property set (spec 15.2). Added: `overflow`, `position`, `top`, `right`, `bottom`, `left`, `z-index`, `opacity`, `content`, `vertical-align`, `white-space`, `direction`, `unicode-bidi`. Plus the M0 set and the shorthands above. `font`, `list-style`, `text-decoration`, and background images are not implemented.
+- [~] Invalidation foundation (spec 17). Attribute, state, and inline changes restyle the subtree. Sibling-sensitive rules restyle the parent's subtree. Stylesheet and tree changes restyle everything. There is no dependency index yet (M3). Tests: `tests/integration/invalidation.rs`.
+- [x] Fixtures: selector, cascade, var, calc. Tests in `tests/selectors`, `tests/style/m1.rs`, `tests/cascade/media.rs`. Own fixture: `fixtures/mit/web-like.css`.
+- [ ] Style a nontrivial AppFront document. Not started. The M0 integration test covers only a small AppFront-style tree.
+- [x] Style a static web-like fixture tree (`tests/integration/web_like.rs`)
 
 ## 4. M2: modern cascade (spec 24)
 

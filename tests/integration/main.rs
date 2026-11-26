@@ -7,6 +7,8 @@
 
 #[path = "../common/mod.rs"]
 mod common;
+mod invalidation;
+mod web_like;
 
 use common::{style_of, TestTree};
 use tpt_css::cascade::origin::Origin;
@@ -37,14 +39,14 @@ fn dom_tree() -> (TestTree, Vec<NodeId>) {
     let mut t = TestTree::new(NodeKind::Document);
     let doc = t.root();
     let html = t.element(doc, "app");
-    t.text(doc);
-    let _ws = t.text(html);
+    t.add_text(doc);
+    let _ws = t.add_text(html);
     let panel = t.element(html, "panel");
     t.add_class(panel, "card");
     t.set_state(panel, StateBits::HOVER);
-    let _ws2 = t.text(panel);
+    let _ws2 = t.add_text(panel);
     let label = t.element(panel, "label");
-    let _ws3 = t.text(panel);
+    let _ws3 = t.add_text(panel);
     let button = t.element(panel, "button");
     t.add_class(button, "primary");
     t.set_state(button, StateBits::DISABLED);

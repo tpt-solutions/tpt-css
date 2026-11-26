@@ -42,7 +42,10 @@ fn tokenizer_golden_files_match() {
     entries.sort();
 
     for css_path in entries {
-        let input = fs::read_to_string(&css_path).expect("fixture is UTF-8");
+        // Normalize line endings so that Windows checkouts (CRLF) match LF goldens.
+        let input = fs::read_to_string(&css_path)
+            .expect("fixture is UTF-8")
+            .replace("\r\n", "\n");
         let actual = dump(&input);
         let expected_path = css_path.with_extension("tokens");
         if update {

@@ -5,16 +5,16 @@
 //!
 //! Turns component values into a typed [`SpecifiedValue`], or rejects them.
 //! Rejected values are dropped at parse time, as CSS requires for values that
-//! do not match the grammar. Values containing `var()` are not handled yet
-//! (M1), so they are rejected here.
+//! do not match the grammar. Values that contain `var()` are not parsed here:
+//! the style layer substitutes them first and parses the result later.
 
 use super::registry::{Grammar, PropertySpec};
-use crate::syntax::{trim_whitespace, ComponentValue, TokenKind};
+use crate::syntax::{trim_whitespace, ComponentValue, NumericType, TokenKind};
 use crate::values::color::parse_color;
-use crate::values::length::numeric_to_length;
+use crate::values::length::parse_length_percentage;
 use crate::values::Value;
 
-/// CSS-wide keywords supported in M0 (spec 13.8). `revert` and `revert-layer`
+/// CSS-wide keywords supported in M1 (spec 13.8). `revert` and `revert-layer`
 /// need origin and layer tracking (M2) and are rejected for now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CssWide {
@@ -30,14 +30,22 @@ pub enum CssWide {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InvalidValue;
 
-/// A parsed declaration value before computation: either a CSS-wide keyword
-/// or a typed value.
+/// A parsed declaration value before computation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SpecifiedValue {
     /// A CSS-wide keyword, resolved during computation.
     CssWide(CssWide),
     /// A typed value.
     Value(Value),
+    /// A value that contains `var()`, kept as tokens until computed-value time
+    /// (spec 13.7). `shorthand` names the shorthand it came from, if any, so the
+    /// expansion can run after substitution.
+    Unparsed {
+        /// The declaration's component values.
+        tokens: Vec<ComponentValue>,
+        /// Index into [`crate::properties::shorthand::SHORTHANDS`], if any.
+        shorthand: Option<usize>,
+    },
 }
 
 /// Parses a declaration value against a property's grammar.
@@ -61,78 +69,36 @@ pub fn parse_property_value(
         }
     }
 
-    match spec.grammar {
-        Grammar::Keywords(list) => keyword(values, list)
-            .map(SpecifiedValue::Value)
-            .ok_or(InvalidValue),
+    let value = match spec.grammar {
+        Grammar::Keywords(list) => keyword(values, list),
         Grammar::Color => {
-            if let Some(k) = keyword(values, &["currentcolor"]) {
-                return Ok(SpecifiedValue::Value(k));
-            }
-            parse_color(values)
-                .map(|c| SpecifiedValue::Value(Value::Color(c)))
-                .ok_or(InvalidValue)
+            keyword(values, &["currentcolor"]).or_else(|| parse_color(values).map(Value::Color))
         }
         Grammar::LengthPercentage {
             non_negative,
             keywords,
-        } => {
-            if let Some(k) = keyword(values, keywords) {
-                return Ok(SpecifiedValue::Value(k));
-            }
-            single_token_length(values, non_negative)
-                .map(SpecifiedValue::Value)
-                .ok_or(InvalidValue)
+        } => keyword(values, keywords)
+            .or_else(|| parse_length_percentage(values, non_negative, true)),
+        Grammar::BorderWidth => keyword(values, &["thin", "medium", "thick"])
+            .map(|k| match k {
+                Value::Keyword("thin") => Value::px(1.0),
+                Value::Keyword("thick") => Value::px(5.0),
+                _ => Value::px(3.0),
+            })
+            .or_else(|| parse_length_percentage(values, true, true)),
+        Grammar::LineHeight => keyword(values, &["normal"])
+            .or_else(|| number(values, |v| v >= 0.0).map(Value::Number))
+            .or_else(|| parse_length_percentage(values, true, true)),
+        Grammar::FontWeight => keyword(values, &["normal", "bold", "bolder", "lighter"])
+            .or_else(|| number(values, |v| (1.0..=1000.0).contains(&v)).map(Value::Number)),
+        Grammar::FontFamily => parse_font_family(values),
+        Grammar::Content => keyword(values, &["normal", "none"]).or_else(|| parse_strings(values)),
+        Grammar::Opacity => number_or_percent(values).map(|v| Value::Number(v.clamp(0.0, 1.0))),
+        Grammar::Integer { keywords } => {
+            keyword(values, keywords).or_else(|| integer(values).map(|n| Value::Number(n as f64)))
         }
-        Grammar::BorderWidth => {
-            if let Some(k) = keyword(values, &["thin", "medium", "thick"]) {
-                let px = match k {
-                    Value::Keyword("thin") => 1.0,
-                    Value::Keyword("thick") => 5.0,
-                    _ => 3.0,
-                };
-                return Ok(SpecifiedValue::Value(Value::px(px)));
-            }
-            single_token_length(values, true)
-                .map(SpecifiedValue::Value)
-                .ok_or(InvalidValue)
-        }
-        Grammar::LineHeight => {
-            if let Some(k) = keyword(values, &["normal"]) {
-                return Ok(SpecifiedValue::Value(k));
-            }
-            if let [ComponentValue::Token(t)] = values {
-                if let TokenKind::Number { value, .. } = t.kind {
-                    return if value >= 0.0 {
-                        Ok(SpecifiedValue::Value(Value::Number(value)))
-                    } else {
-                        Err(InvalidValue)
-                    };
-                }
-            }
-            single_token_length(values, true)
-                .map(SpecifiedValue::Value)
-                .ok_or(InvalidValue)
-        }
-        Grammar::FontWeight => {
-            if let Some(k) = keyword(values, &["normal", "bold", "bolder", "lighter"]) {
-                return Ok(SpecifiedValue::Value(k));
-            }
-            if let [ComponentValue::Token(t)] = values {
-                if let TokenKind::Number { value, .. } = t.kind {
-                    return if (1.0..=1000.0).contains(&value) {
-                        Ok(SpecifiedValue::Value(Value::Number(value)))
-                    } else {
-                        Err(InvalidValue)
-                    };
-                }
-            }
-            Err(InvalidValue)
-        }
-        Grammar::FontFamily => parse_font_family(values)
-            .map(SpecifiedValue::Value)
-            .ok_or(InvalidValue),
-    }
+    };
+    value.map(SpecifiedValue::Value).ok_or(InvalidValue)
 }
 
 fn css_wide(name: &str) -> Option<CssWide> {
@@ -159,11 +125,41 @@ fn keyword(values: &[ComponentValue], list: &'static [&'static str]) -> Option<V
         .map(Value::Keyword)
 }
 
-fn single_token_length(values: &[ComponentValue], non_negative: bool) -> Option<Value> {
-    let [ComponentValue::Token(t)] = values else {
-        return None;
-    };
-    numeric_to_length(&t.kind, non_negative, true)
+/// A single unitless number that satisfies `accept`.
+fn number(values: &[ComponentValue], accept: impl Fn(f64) -> bool) -> Option<f64> {
+    match values {
+        [ComponentValue::Token(t)] => match t.kind {
+            TokenKind::Number { value, .. } if accept(value) => Some(value),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A single number or percentage, as a number (`50%` is `0.5`).
+fn number_or_percent(values: &[ComponentValue]) -> Option<f64> {
+    match values {
+        [ComponentValue::Token(t)] => match t.kind {
+            TokenKind::Number { value, .. } => Some(value),
+            TokenKind::Percentage(p) => Some(p / 100.0),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A single integer.
+fn integer(values: &[ComponentValue]) -> Option<i64> {
+    match values {
+        [ComponentValue::Token(t)] => match t.kind {
+            TokenKind::Number {
+                value,
+                ty: NumericType::Integer,
+            } => Some(value as i64),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// `font-family`: a comma-separated list. Each entry is either one string or
@@ -195,4 +191,20 @@ fn parse_font_family(values: &[ComponentValue]) -> Option<Value> {
         names.push(words.join(" "));
     }
     Some(Value::FontFamily(names))
+}
+
+/// One or more strings, separated by whitespace (the `content` grammar).
+fn parse_strings(values: &[ComponentValue]) -> Option<Value> {
+    let mut out = Vec::new();
+    for v in values {
+        match v {
+            ComponentValue::Token(t) => match &t.kind {
+                TokenKind::String(s) => out.push(s.clone()),
+                TokenKind::Whitespace => {}
+                _ => return None,
+            },
+            _ => return None,
+        }
+    }
+    (!out.is_empty()).then_some(Value::Strings(out))
 }

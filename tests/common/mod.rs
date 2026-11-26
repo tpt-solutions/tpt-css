@@ -11,7 +11,7 @@ use tpt_css::ast::Declaration;
 use tpt_css::parse::ParsedStylesheet;
 use tpt_css::tree::node::NamespaceId;
 use tpt_css::tree::{
-    Attributes, ElementState, NodeId, NodeKind, QualifiedName, StateBits, StyleTree,
+    Attributes, Direction, ElementState, NodeId, NodeKind, QualifiedName, StateBits, StyleTree,
 };
 use tpt_css::{
     parse_declaration_list, ComputedStyle, Environment, Origin, ParseOptions, StyleMap,
@@ -26,6 +26,9 @@ pub struct TestNode {
     pub attributes: Attributes,
     pub state: ElementState,
     pub inline: Option<Vec<Declaration>>,
+    pub text: String,
+    pub language: Option<String>,
+    pub direction: Option<Direction>,
 }
 
 pub struct TestTree {
@@ -53,6 +56,9 @@ impl TestTree {
             attributes: Attributes::default(),
             state: ElementState::default(),
             inline: None,
+            text: String::new(),
+            language: None,
+            direction: None,
         });
         if let Some(p) = parent {
             self.nodes[p.index as usize].children.push(id);
@@ -69,9 +75,31 @@ impl TestTree {
         self.push(Some(parent), NodeKind::Element, name)
     }
 
-    /// Adds a text node under `parent`.
-    pub fn text(&mut self, parent: NodeId) -> NodeId {
+    /// Adds an empty text node under `parent`. Use [`TestTree::set_text`] for content.
+    pub fn add_text(&mut self, parent: NodeId) -> NodeId {
         self.push(Some(parent), NodeKind::Text, "#text")
+    }
+
+    /// Adds a text node with content under `parent`.
+    pub fn add_text_with(&mut self, parent: NodeId, content: &str) -> NodeId {
+        let id = self.add_text(parent);
+        self.set_text(id, content);
+        id
+    }
+
+    pub fn set_text(&mut self, node: NodeId, content: &str) -> &mut Self {
+        self.nodes[node.index as usize].text = content.to_string();
+        self
+    }
+
+    pub fn set_lang(&mut self, node: NodeId, lang: &str) -> &mut Self {
+        self.nodes[node.index as usize].language = Some(lang.to_string());
+        self
+    }
+
+    pub fn set_dir(&mut self, node: NodeId, dir: Direction) -> &mut Self {
+        self.nodes[node.index as usize].direction = Some(dir);
+        self
     }
 
     pub fn set_id(&mut self, node: NodeId, id: &str) -> &mut Self {
@@ -134,19 +162,33 @@ impl StyleTree for TestTree {
     fn inline_style(&self, node: NodeId) -> Option<&[Declaration]> {
         self.nodes[node.index as usize].inline.as_deref()
     }
+    fn text(&self, node: NodeId) -> &str {
+        &self.nodes[node.index as usize].text
+    }
+    fn language(&self, node: NodeId) -> Option<&str> {
+        self.nodes[node.index as usize].language.as_deref()
+    }
+    fn direction(&self, node: NodeId) -> Option<Direction> {
+        self.nodes[node.index as usize].direction
+    }
 }
 
-/// Parses `css` as an author stylesheet, panicking if it is not parseable at all.
+/// Parses `css` as an author stylesheet.
 pub fn parse_sheet(css: &str) -> ParsedStylesheet {
     tpt_css::parse_stylesheet(css, ParseOptions::default())
 }
 
 /// Resolves `css` (author origin) against `tree` with the default environment.
 pub fn style_with(css: &str, tree: &TestTree) -> StyleMap {
+    style_with_env(css, tree, &Environment::default())
+}
+
+/// Resolves `css` (author origin) against `tree` with the given environment.
+pub fn style_with_env(css: &str, tree: &TestTree, env: &Environment) -> StyleMap {
     let mut resolver = StyleResolver::new(Default::default());
     let parsed = parse_sheet(css);
     resolver.add_stylesheet(parsed.stylesheet, Origin::Author);
-    resolver.resolve(tree, &Environment::default())
+    resolver.resolve(tree, env)
 }
 
 /// The computed style of `node`, panicking if the node was not styled.

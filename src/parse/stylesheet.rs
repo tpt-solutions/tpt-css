@@ -54,7 +54,7 @@ pub fn parse_stylesheet(input: &str, options: ParseOptions) -> ParsedStylesheet 
         }
     };
 
-    let rules = consume_rule_list(&values, &limits, &mut diagnostics);
+    let rules = consume_rule_list(&values, &limits, &mut diagnostics, 0);
     ParsedStylesheet {
         stylesheet: Stylesheet { rules },
         diagnostics,

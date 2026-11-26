@@ -47,6 +47,15 @@ pub enum Grammar {
     FontWeight,
     /// A comma-separated font family list.
     FontFamily,
+    /// `content`: `normal`, `none`, or one or more strings.
+    Content,
+    /// `opacity`: a number, clamped to `[0, 1]`. Percentages are accepted.
+    Opacity,
+    /// An integer, or one of the keywords (`z-index`).
+    Integer {
+        /// Extra keywords accepted in place of an integer.
+        keywords: &'static [&'static str],
+    },
 }
 
 /// The initial value (spec 15.1 `initial`). A small enum so the table is
@@ -130,6 +139,40 @@ const BORDER_STYLE_KEYWORDS: &[&str] = &[
     "none", "hidden", "dotted", "dashed", "solid", "double", "groove", "ridge", "inset", "outset",
 ];
 const BOX_SIZING_KEYWORDS: &[&str] = &["content-box", "border-box"];
+const OVERFLOW_KEYWORDS: &[&str] = &["visible", "hidden", "clip", "scroll", "auto"];
+const POSITION_KEYWORDS: &[&str] = &["static", "relative", "absolute", "fixed", "sticky"];
+const VERTICAL_ALIGN_KEYWORDS: &[&str] = &[
+    "baseline",
+    "sub",
+    "super",
+    "text-top",
+    "text-bottom",
+    "middle",
+    "top",
+    "bottom",
+];
+const WHITE_SPACE_KEYWORDS: &[&str] = &[
+    "normal",
+    "nowrap",
+    "pre",
+    "pre-wrap",
+    "pre-line",
+    "break-spaces",
+];
+const DIRECTION_KEYWORDS: &[&str] = &["ltr", "rtl"];
+const UNICODE_BIDI_KEYWORDS: &[&str] = &[
+    "normal",
+    "embed",
+    "isolate",
+    "bidi-override",
+    "isolate-override",
+    "plaintext",
+];
+const CSS_POSITION: &str = "https://www.w3.org/TR/css-position-3/";
+const CSS_OVERFLOW: &str = "https://www.w3.org/TR/css-overflow-3/";
+const CSS_CONTENT: &str = "https://www.w3.org/TR/css-content-3/";
+const CSS_INLINE: &str = "https://www.w3.org/TR/css-inline-3/";
+const CSS_WRITING: &str = "https://www.w3.org/TR/css-writing-modes-4/";
 const AUTO: &[&str] = &["auto"];
 const NONE: &[&str] = &["none"];
 const NO_KEYWORDS: &[&str] = &[];
@@ -321,7 +364,100 @@ pub const PROPERTIES: &[PropertySpec] = &[
         grammar: Grammar::Keywords(BOX_SIZING_KEYWORDS),
         spec_url: CSS_SIZING,
     },
+    // 37
+    PropertySpec {
+        name: "overflow",
+        inherited: false,
+        initial: Initial::Keyword("visible"),
+        grammar: Grammar::Keywords(OVERFLOW_KEYWORDS),
+        spec_url: CSS_OVERFLOW,
+    },
+    // 38
+    PropertySpec {
+        name: "position",
+        inherited: false,
+        initial: Initial::Keyword("static"),
+        grammar: Grammar::Keywords(POSITION_KEYWORDS),
+        spec_url: CSS_POSITION,
+    },
+    // 39-42
+    offset("top"),
+    offset("right"),
+    offset("bottom"),
+    offset("left"),
+    // 43
+    PropertySpec {
+        name: "z-index",
+        inherited: false,
+        initial: Initial::Keyword("auto"),
+        grammar: Grammar::Integer { keywords: AUTO },
+        spec_url: CSS_POSITION,
+    },
+    // 44
+    PropertySpec {
+        name: "opacity",
+        inherited: false,
+        initial: Initial::Number(1.0),
+        grammar: Grammar::Opacity,
+        spec_url: CSS_COLOR,
+    },
+    // 45
+    PropertySpec {
+        name: "content",
+        inherited: false,
+        initial: Initial::Keyword("normal"),
+        grammar: Grammar::Content,
+        spec_url: CSS_CONTENT,
+    },
+    // 46
+    PropertySpec {
+        name: "vertical-align",
+        inherited: false,
+        initial: Initial::Keyword("baseline"),
+        grammar: Grammar::LengthPercentage {
+            non_negative: false,
+            keywords: VERTICAL_ALIGN_KEYWORDS,
+        },
+        spec_url: CSS_INLINE,
+    },
+    // 47
+    PropertySpec {
+        name: "white-space",
+        inherited: true,
+        initial: Initial::Keyword("normal"),
+        grammar: Grammar::Keywords(WHITE_SPACE_KEYWORDS),
+        spec_url: CSS_TEXT,
+    },
+    // 48
+    PropertySpec {
+        name: "direction",
+        inherited: true,
+        initial: Initial::Keyword("ltr"),
+        grammar: Grammar::Keywords(DIRECTION_KEYWORDS),
+        spec_url: CSS_WRITING,
+    },
+    // 49
+    PropertySpec {
+        name: "unicode-bidi",
+        inherited: false,
+        initial: Initial::Keyword("normal"),
+        grammar: Grammar::Keywords(UNICODE_BIDI_KEYWORDS),
+        spec_url: CSS_WRITING,
+    },
 ];
+
+const fn offset(name: &'static str) -> PropertySpec {
+    PropertySpec {
+        name,
+        inherited: false,
+        initial: Initial::Keyword("auto"),
+        grammar: Grammar::LengthPercentage {
+            non_negative: false,
+            keywords: AUTO,
+        },
+        spec_url: CSS_POSITION,
+    }
+}
 
 const fn margin(name: &'static str) -> PropertySpec {
     PropertySpec {
@@ -398,6 +534,8 @@ pub mod ids {
     pub const FONT_SIZE: PropertyId = PropertyId(5);
     /// `font-weight`
     pub const FONT_WEIGHT: PropertyId = PropertyId(7);
+    /// `content`, which decides whether `::before` and `::after` are generated.
+    pub const CONTENT: PropertyId = PropertyId(45);
     /// `border-top-width`, first of the four border widths
     pub const BORDER_TOP_WIDTH: PropertyId = PropertyId(24);
     /// `border-top-style`, first of the four border styles
