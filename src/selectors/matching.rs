@@ -13,7 +13,7 @@
 //! anchor element, so its leftmost compound is checked against that anchor.
 //!
 //! Structural pseudo-classes read element siblings through the tree contract.
-//! A [`SiblingCache`] holds each parent's element children and their positions,
+//! A `SiblingCache` (crate-private) holds each parent's element children and their positions,
 //! built once per style pass, so `:nth-child()` and `+` cost O(log siblings) per
 //! node. Without a cache, the matcher builds the same index for each check.
 //! `:nth-child(... of S)` also caches, per parent and list, which siblings match S,

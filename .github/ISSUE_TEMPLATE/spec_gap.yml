@@ -1,0 +1,40 @@
+name: Specification gap
+description: The engine does not follow a CSS specification, or does not cover part of it.
+labels: ["spec"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Cite the specification sentence that the engine does not follow. Check TODO.md
+        and DESIGN.md first; many gaps are already recorded there.
+  - type: input
+    id: spec
+    attributes:
+      label: Specification and section
+      description: For example "CSS Cascade 5, section 6.2", with a link if you have one.
+    validations:
+      required: true
+  - type: textarea
+    id: quote
+    attributes:
+      label: Specification text
+      description: The sentence or rule you are referring to. Quote it or link to it.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What the engine does
+      description: A minimal stylesheet and tree, and the output you see.
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind of gap
+      options:
+        - Wrong behavior (the engine follows the spec incorrectly)
+        - Missing feature (the engine does not implement it)
+        - Partly implemented (some cases work, some do not)
+    validations:
+      required: true

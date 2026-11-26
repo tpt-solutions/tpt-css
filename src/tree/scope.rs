@@ -17,7 +17,7 @@ pub struct ScopeInfo {
     pub upper_bound: Option<NodeId>,
 }
 
-/// Shadow-tree information (spec 9.3). See [`StyleTree::shadow`].
+/// Shadow-tree information (spec 9.3). See [`crate::tree::StyleTree::shadow`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ShadowInfo {
     /// Host element, if the node is in a shadow tree.

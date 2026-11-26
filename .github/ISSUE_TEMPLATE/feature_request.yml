@@ -1,0 +1,30 @@
+name: Feature request
+description: Propose a feature, an example, a tool, or a documentation change.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check TODO.md first. Many planned features are already listed there, with
+        their status. If a CSS feature is involved, name the specification it comes from.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you want to do
+      description: The use case, in your own words.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What the feature, example, or change would look like.
+    validations:
+      required: false
+  - type: input
+    id: spec
+    attributes:
+      label: Specification
+      description: The CSS specification the feature comes from, if any.
+    validations:
+      required: false

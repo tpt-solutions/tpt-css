@@ -1,0 +1,56 @@
+name: Bug report
+description: The engine gives a wrong or crashing result for some CSS or tree.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please include a minimal stylesheet and tree that reproduces the problem.
+        Do not paste implementation code from other CSS engines (see CLEAN_ROOM.md).
+  - type: textarea
+    id: css
+    attributes:
+      label: Stylesheet
+      description: The smallest CSS that shows the problem.
+      render: css
+    validations:
+      required: true
+  - type: textarea
+    id: tree
+    attributes:
+      label: Tree
+      description: The elements involved, with their names, attributes, and state. A sketch is fine.
+    validations:
+      required: false
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      description: The computed value you expected, and the spec section that says so, if you know it.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: What the engine produced, including any diagnostics it printed.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The commit hash you tested, or the version from Cargo.toml.
+    validations:
+      required: false
+  - type: dropdown
+    id: features
+    attributes:
+      label: Cargo features
+      options:
+        - Default (appfront)
+        - "--no-default-features"
+        - "--features web"
+        - "--features cssom"
+    validations:
+      required: false

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Read the contributing guide
+    url: https://github.com/tpt-solutions/tpt-css/blob/master/CONTRIBUTING.md
+    about: How to report issues and what to include.

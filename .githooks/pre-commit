@@ -1,0 +1,10 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT OR Apache-2.0
+#
+# Runs the fast CI gates before each commit. Enable it once per clone with:
+#   git config core.hooksPath .githooks
+
+set -e
+
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings

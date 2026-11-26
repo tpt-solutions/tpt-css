@@ -4,7 +4,7 @@
 //! Style resolution (spec 8.2, 13, 16.1).
 //!
 //! Per target (an element, or one pseudo-element), the resolver collects every
-//! candidate declaration into a [`Cascaded`] set. It then picks winners per
+//! candidate declaration into a `Cascaded` set (crate-private). It then picks winners per
 //! property, handling `revert` and `revert-layer` (spec 13.8), and computes
 //! values in dependency order: custom properties first, then font-size, color,
 //! font-weight, and the rest. Each step applies inheritance and CSS-wide

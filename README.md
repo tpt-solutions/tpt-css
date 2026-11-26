@@ -4,11 +4,9 @@ A clean-room CSS engine in Rust. It takes CSS text through tokens, a stylesheet
 AST, selector matching, the cascade, and property parsing to computed styles,
 over any tree that implements a small `StyleTree` trait.
 
-**Status:** M2 is complete, and M3 and M4 are partly done. Cascade layers,
-`@supports`, nesting, `@container`, `@property`, `:has()`, `@scope`, CSSOM
-editing (feature `cssom`), math functions, modern colors, and incremental restyle
-are in. Open items are in [TODO.md](TODO.md). What is implemented, tested, and
-still missing is in [SPEC_TRACE.md](SPEC_TRACE.md).
+**Status:** see [docs/STATUS.md](docs/STATUS.md) for what works, what is partly
+done, and what is missing. Open items are in [TODO.md](TODO.md). Spec-by-spec
+traceability is in [SPEC_TRACE.md](SPEC_TRACE.md).
 
 ## Design
 
@@ -25,16 +23,26 @@ still missing is in [SPEC_TRACE.md](SPEC_TRACE.md).
 
 ## Example
 
-```rust
-use tpt_css::{parse_stylesheet, Environment, Origin, ParseOptions, StyleResolver};
-use tpt_css::ResolverConfig;
+A complete program is in [examples/minimal.rs](examples/minimal.rs). It
+implements `StyleTree` for a small arena tree and prints computed colors:
 
-// `tree` is any type that implements tpt_css::StyleTree.
+```sh
+cargo run --example minimal
+```
+
+The core calls are:
+
+```rust,ignore
+use tpt_css::{parse_stylesheet, Environment, Origin, ParseOptions, ResolverConfig, StyleResolver};
+
 let parsed = parse_stylesheet("p { color: red }", ParseOptions::default());
 let mut resolver = StyleResolver::new(ResolverConfig::default());
 resolver.add_stylesheet(parsed.stylesheet, Origin::Author);
+// `tree` implements tpt_css::StyleTree; see examples/minimal.rs.
 let styles = resolver.resolve(&tree, &Environment::default());
 ```
+
+`tests/examples.rs` checks the example's output, so it stays in step with the API.
 
 ## Build and test
 

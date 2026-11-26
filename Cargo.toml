@@ -20,8 +20,13 @@ default = ["appfront"]
 appfront = []
 web = ["cssom"]
 
-# Optional API surfaces (spec 7). `cssom` is a placeholder until M3.
+# Optional API surfaces (spec 7). `cssom` is the CSSOM editing API (M3).
 cssom = []
+
+# Examples are found automatically under examples/. This one needs a feature.
+[[example]]
+name = "cssom_edit"
+required-features = ["cssom"]
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -22,12 +22,27 @@ jobs:
 
   clippy:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        features: ["", "--no-default-features", "--features web"]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --all-targets ${{ matrix.features }} -- -D warnings
+
+  doc:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        features: ["", "--no-default-features", "--features web"]
+    env:
+      RUSTDOCFLAGS: "-D warnings"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo doc --no-deps ${{ matrix.features }}
 
   test:
     runs-on: ubuntu-latest
@@ -52,7 +67,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
-          command: check licenses bans
+          command: check licenses bans advisories
 
   unsafe-check:
     runs-on: ubuntu-latest
@@ -69,7 +84,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
-      - uses: taiki-e/install-action@cargo-fuzz
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - name: Check cargo-fuzz is available
+        run: |
+          command -v cargo-fuzz
+          cargo-fuzz --version
+          cargo +nightly --version
       - name: Run each fuzz target for 60 seconds
         run: |
           cd fuzz

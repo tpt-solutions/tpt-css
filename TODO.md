@@ -92,7 +92,7 @@ All decisions are recorded in DESIGN.md section 2.
 - [x] Initial M0 property set (spec 15.2, 37 properties)
 - [x] `properties/aliases.rs`: explicit alias registry, no string stripping (spec 15.4). One alias (`word-wrap` for `overflow-wrap`), and a test that vendor prefixes are not stripped (`tests/style/m3.rs`).
 - [x] `style/resolver.rs`: the cascade pipeline, with custom properties and `var()` (steps 5–8) in place (spec 16.1). See `style/custom.rs`.
-- [x] `style/inheritance.rs`: inheritance is in `style/resolver.rs` (DESIGN.md 5)
+- [x] Inheritance is in `style/resolver.rs` (DESIGN.md 5). There is no `style/inheritance.rs`.
 - [x] `style/computed.rs`: `ComputedStyle` with typed accessors and property-ID storage (spec 8.3)
 - [x] `StyleMap` with `get`, `get_pseudo`, and `custom_property` (spec 8.3).
 - [x] Font-size computed first (spec 16.1)
@@ -146,7 +146,7 @@ All decisions are recorded in DESIGN.md section 2.
 
 - [x] `@layer` with first-declaration order and layer cascade rules (spec 13.4). Tests: `tests/cascade/layers.rs`.
 - [x] `@supports` using engine's own capabilities, `selector()`, `not`, `and`, `or` (spec 16.4). Evaluated at parse time.
-- [x] `@scope`, `:scope`, Cascade 6 scope proximity (spec 13.3). Proximity ranks after specificity, following the sorting order of the current Cascade 6 draft. `spec.txt` 13.3 puts it before specificity, which needs correcting there. Unscoped rules have infinite proximity (`tests/style/m3.rs`).
+- [x] `@scope`, `:scope`, Cascade 6 scope proximity (spec 13.3). Proximity ranks after specificity, following the sorting order of the current Cascade 6 draft. `spec.txt` 13.3 now uses the same order (corrected 2026-11-27). Unscoped rules have infinite proximity (`tests/style/m3.rs`).
 - [x] CSS nesting and `&` (spec 12.3).
 - [x] `@container` foundation and `ContainerSizeProvider` (spec 16.5).
 - [x] `@property` and registered custom properties (spec 13.7).
@@ -202,13 +202,61 @@ All decisions are recorded in DESIGN.md section 2.
 - [~] Each supported property, selector, cascade rule has tests (spec 2.5). Covered broadly; not every property has its own test.
 - [x] `SPEC_TRACE.md` updated (spec 22.5). A test (`tests/integration/spec_trace.rs`) checks that every file the trace names exists.
 - [x] `CLEAN_ROOM.md` provenance log updated for each contributor (spec 23.1). Entries added for each batch; each needs a human review.
-- [~] Fuzz targets: tokenizer, stylesheet, selector, declaration, calc, and color (spec 22.3). Written in `fuzz/` as a separate package, so libfuzzer-sys is not in the engine's dependency tree. The targets type-check against the engine. They run in the `fuzz-smoke` CI job (Linux, nightly, 60 seconds each), not yet on a runner. The var and color-function targets are covered by the stylesheet target.
+- [~] Fuzz targets: tokenizer, stylesheet, selector, declaration, calc, and color (spec 22.3). Written in `fuzz/` as a separate package, so libfuzzer-sys is not in the engine's dependency tree. The targets type-check against the engine. The `fuzz-smoke` job in `ci.yml` runs them (Linux, nightly, 60 seconds each). Not yet confirmed green on a runner. The var and color-function targets are covered by the stylesheet target.
 - [~] Property-based tests (spec 22.4). Seeded generators cover specificity additivity, `:is()` and `:where()` equivalence, incremental restyle against a full resolve, custom property cycle termination, declaration round trips, hostile text, every arity of the `margin` shorthand, and the `calc`, `min`, `max`, and `clamp` definitions. Other shorthands and the other math functions are not covered yet.
 - [~] Performance targets measured (spec 21.1). Tokenizer throughput, static-tree restyle, and wide sibling lists are measured (`tests/integration/perf.rs`, ignored by default; numbers in DESIGN.md section 8). A wide list with `:nth-child()` and `+` now resolves in linear time: 8,000 siblings took 50 ms against 389 ms before the sibling index (4.2 times the time for 4 times the siblings, where quadratic would give about 16). `~` and `:nth-of-type()` on wide lists are measured and scale linearly (ratios 3.8 and 4.3 for 4 times the siblings). `:nth-child(of S)` was close to quadratic (ratio 11.7 for 4 times the siblings) and is now linear (ratio 4.0) after the per-parent index (DESIGN.md section 8, decision 34).
 - [~] Bounds enforced (spec 20.3). Tokens, nesting, selector work and complexity, rule and declaration counts, input size, var depth, custom property cycles, the step budget, and stylesheet count (`max_stylesheets`, via `try_add_stylesheet`). Calc nesting is checked against `max_calc_depth` at declaration parse and after `var()` substitution. The value parser recurses up to 256, so the configured limit is the effective one.
 - [~] No panics on hostile input (spec 19.1). Seeded hostile-text tests; not a fuzzer.
 - [x] Determinism: no hash-map iteration in cascade (spec 21.3).
-- [x] `cargo deny check licenses` and `bans` pass locally. Not run in CI on a runner.
+- [x] `cargo deny check licenses` and `bans` pass locally. The `deny` job in `ci.yml` runs them; the CI result is not confirmed here.
 - [x] No Apache-only dependencies in the dependency tree (spec 23.2). The core has no dependencies.
 - [x] No `unsafe` (spec 23.3).
 - [x] Each commit keeps `cargo test`, `cargo test --no-default-features`, `cargo test --features web`, and `cargo test --features cssom` green. Checked on the working tree.
+
+## 8. Review follow-ups (review of 2026-11-27)
+
+Source: a review of the repo for bugs, gaps, usability, adoption, and automation. The review found no failing tests; `cargo test`, `cargo fmt --check`, and `cargo clippy -D warnings` pass on the default features.
+
+### Docs and correctness
+- [ ] Commit or revert the uncommitted `ci.yml` changes: the fuzz install step (`taiki-e/install-action@v2`), the clippy matrix, the `doc` job, and `advisories` in the `deny` job. Left for the owner to decide.
+- [x] Fix stale claims about deny and fuzz CI in sections 0 and 7.
+- [x] README example is accurate. Its snippet is marked `rust,ignore` and points to `examples/minimal.rs`, a complete program that `tests/examples.rs` checks.
+- [x] `cargo doc --no-deps` with `-D warnings` passes on all three feature sets. Three broken links were fixed: two public docs linked to private items, and one used a path that did not resolve.
+- [x] The spec 13.3 cascade key order is already corrected in `spec.txt` (specificity before scope proximity, line 1162). The section 4 note that said it still needed correcting was stale and is fixed.
+- [ ] Every batch in `CLEAN_ROOM.md` is marked "Not yet reviewed by a human". Needs a reviewer who knows the specifications before merge.
+
+### Adoption
+- [x] `examples/minimal.rs`: a small arena tree implementing `StyleTree`, styled with one stylesheet. `tests/examples.rs` asserts its output.
+- [x] `examples/dark_mode.rs`: custom properties switched by `prefers-color-scheme`. Checked by `tests/examples.rs`.
+- [x] `examples/diagnostics.rs`: prints each parse diagnostic with its severity and position. Checked by `tests/examples.rs`.
+- [x] `examples/cssom_edit.rs` (feature `cssom`): CSSOM insert and set_property, serialized. Checked by `tests/examples.rs` under `--features cssom`.
+- [ ] `examples/media_and_container.rs`: media queries and container sizes.
+- [x] `examples/common/mod.rs`: the shared arena tree for the examples. Loaded once by `tests/examples.rs` so clippy accepts it.
+- [x] Starter adapter template in `templates/adapter/`: a node store implementing `StyleTree`, with a test. It is a separate package that depends on the engine by path. Its test passes locally.
+- [x] `CONTRIBUTING.md`: contributions are through issues only. Covers the issue templates, the clean-room rule, and the build commands.
+- [x] Issue templates in `.github/ISSUE_TEMPLATE/` (bug report, specification gap, feature request). No pull request template, because contributions are issues only.
+- [x] `CHANGELOG.md` (Unreleased section).
+- [x] Milestone status moved out of `README.md` into `docs/STATUS.md`.
+- [x] `SECURITY.md` was never created, so there is no file to remove. The item was dropped.
+
+### Automation
+- [x] CI: `doc` job, `cargo doc --no-deps` with `RUSTDOCFLAGS=-D warnings`, across the feature matrix. Checked locally; not yet run on a runner.
+- [x] CI: `clippy` job across the feature matrix (default, `--no-default-features`, `--features web`). Checked locally; not yet run on a runner.
+- [x] `cargo deny check advisories` added to the `deny` job. Passes locally.
+- [x] Dependabot for GitHub Actions and the `fuzz/` crate (`.github/dependabot.yml`). Not yet run on GitHub.
+- [ ] A script that turns unchecked TODO items into "good first issue" issues. Not started: it would create issues on GitHub, so it should run only with the owner's go-ahead.
+- [x] Pre-commit hook (`.githooks/pre-commit`) for `cargo fmt --check` and clippy. Enabled with `git config core.hooksPath .githooks`. Run once locally; the hook file's executable bit is not set on Windows.
+
+### Innovative
+- [ ] `tpt-css` CLI: `check` prints diagnostics for a stylesheet; `compute` prints computed styles for a JSON fixture tree.
+- [ ] WASM playground: CSS in, computed styles, diagnostics, and `Inspection` out, on a static page.
+- [ ] Generated support table from `properties/registry.rs` and the test names, published from CI. Replaces hand-kept coverage claims.
+- [ ] Computed-style snapshots for the fixtures, with a diff printed in CI when they change.
+
+### Usability findings
+- [ ] A misspelled property name (for example `colr: blue`) is dropped with no diagnostic. The parser reports invalid values but not unknown property names. Decide whether unknown names should warn (a diagnostic code is needed) or stay silent as the spec requires for forward compatibility, then add the warning or record the decision in DESIGN.md.
+
+### Missing features that block real pages
+- [ ] Parse `box-shadow`, `transform`, `transition`, `flex`, and `grid` as pass-through values, so a layout engine downstream can read them. Layout itself stays out of scope.
+- [ ] `background-image` and `content` counters (see section 3).
+- [ ] A DOM adapter, so the web profile has an end-to-end test (see section 5).
