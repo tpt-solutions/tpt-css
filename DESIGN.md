@@ -479,6 +479,31 @@ engineering measurements, not claims about other machines (spec 21.1).
     call, as before. Measured in DESIGN.md section 8: the growth ratio for 4 times
     the siblings fell from 11.7 to 4.0.
 
+35. **Style sharing: measured split and design (proposed, not built).** Measured
+    in release (`resolve_split_between_computation_and_matching`, 10,000 elements,
+    one run on this machine): an empty sheet takes 83 ms, which is the tree walk
+    plus computing every property for every element. A real sheet takes 89 ms, so
+    selector matching and the cascade take about 6 ms. Sharing a computed style
+    between elements saves the computation, not the matching. Computation is where
+    the time goes, so sharing is worth building, but a cheaper first step is to
+    stop allocating per element in `compute_style`. It starts from
+    `PROPERTIES.iter().map(initial.to_value())` for all 88 properties and clones
+    each specified value, and that setup is paid for every element. Recommended
+    order: (a) remove that per-element setup and measure; (b) then share, if
+    computation is still most of the time.
+
+    Sharing key, for an element (not a pseudo-element, which is never shared):
+    the parent's computed style (compared by value, since inherited properties
+    come from it), the ordered list of winning declarations from the cascade (a
+    hash of it selects the bucket, and equality confirms), the container size used
+    for container units, and the attribute values that `content: attr()` reads
+    (or the element is not shared when any sheet uses `attr()`). Two elements with
+    equal keys compute equal styles, so a hit reuses the first one's result.
+    Environment and viewport are constant for a pass, and the cache is cleared at
+    the start of each pass. Custom properties declared on the element are among
+    its winning declarations, so the key covers them. Inherited custom properties
+    come from the parent's style, so the parent comparison covers them.
+
 ### Still open
 
 - Scope proximity is implemented (decision 12). The order matches the Cascade 6 draft. `spec.txt` 13.3 was corrected in a39110c.
