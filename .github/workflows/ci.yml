@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 # CI gates from spec.txt section 23.3.
 #
-# Not yet in CI: fuzz smoke (fuzz targets are not written) and the spec trace
-# check (tools/spec_trace does not exist yet). Add them when they exist.
+# The spec trace check runs inside `cargo test` (tests/integration/spec_trace.rs).
+# Fuzz smoke runs on Linux with nightly and cargo-fuzz (see the fuzz-smoke job).
+# Linux-only tooling belongs here, not on a developer machine.
 name: ci
 
 on:
@@ -62,3 +63,16 @@ jobs:
           if grep -rnE '\bunsafe\b' src --include='*.rs' | grep -v 'forbid(unsafe_code)'; then
             echo "unsafe found"; exit 1
           fi
+
+  fuzz-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@cargo-fuzz
+      - name: Run each fuzz target for 60 seconds
+        run: |
+          cd fuzz
+          for target in tokenizer stylesheet declaration selector calc color; do
+            cargo +nightly fuzz run "$target" -- -max_total_time=60
+          done

@@ -26,7 +26,7 @@ Legend: `[ ]` not started, `[~]` in progress or partly done (the note says what 
 - [x] Create `src/lib.rs` with `#![forbid(unsafe_code)]` (spec 23.3)
 - [x] Add every first-party file header `// SPDX-License-Identifier: MIT OR Apache-2.0` (spec 23.2). Checked: all 50 `.rs` files.
 - [x] Decide first commit scope and make it (spec 26). Scope: the M0 foundation as one commit on branch `m0-foundation`, not pushed.
-- [~] Add CI workflow: fmt, clippy, test, feature matrix, MSRV (1.75), deny, unsafe check, and the spec trace check (spec 23.3). Written in `.github/workflows/ci.yml`, but not run on a real runner. The spec trace check is a test in `cargo test` (`tests/integration/spec_trace.rs`). The fuzz smoke job is missing, because there are no fuzz targets. The local equivalents are run for each batch.
+- [~] Add CI workflow: fmt, clippy, test, feature matrix, MSRV (1.75), deny, unsafe check, the spec trace check (inside `cargo test`), and fuzz smoke (spec 23.3). Written in `.github/workflows/ci.yml`, but not run on a real runner. The fuzz smoke job runs each target in `fuzz/` for 60 seconds on Linux with nightly. Linux-only tooling runs in CI, not on a developer machine.
 
 ## 1. Open design decisions (resolve in M0, spec 25)
 
@@ -193,8 +193,8 @@ All decisions are recorded in DESIGN.md section 2.
 - [x] `::part`, `::slotted`, and `::highlight(name)` are parsed and matched, and `::highlight` styles are stored under their name. Their declarations are the element's own for `::part` and `::slotted`. The other pseudo-elements in the identity list are not parsed.
 - [~] Serialization edge cases. Canonical serialization of values, selectors, and rules; the exact CSS spelling of every edge case is not checked.
 - [x] Remaining calc functions: `round()`, `mod()`, `rem()`, trig (`sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`), `pow()`, `sqrt()`, `log()`, `exp()`, `sign()`, `abs()`, `hypot()`, `progress()` (spec 14.4). Trig takes unitless radians, since angle units are not parsed as values.
-- [ ] External WPT CSS subsuite runs in CI from separate checkout (spec 22.2). Not run; it needs a separate checkout.
-- [ ] Record pass/fail deltas in `SPEC_TRACE.md` (spec 22.2). Depends on the WPT run above.
+- [x] External WPT CSS subsuite (spec 22.2). Decided out of scope for this architecture: most CSS tests are reftests (render and compare pixels), and the rest are testharness tests that need a JavaScript DOM. The engine has neither. Revisit when a DOM adapter exists. Recorded in DESIGN.md decision 33.
+- [x] Record pass/fail deltas in `SPEC_TRACE.md` (spec 22.2). Not applicable: there is no WPT run (see the WPT decision in DESIGN.md).
 
 ## 7. Cross-cutting (every milestone)
 
@@ -202,7 +202,7 @@ All decisions are recorded in DESIGN.md section 2.
 - [~] Each supported property, selector, cascade rule has tests (spec 2.5). Covered broadly; not every property has its own test.
 - [x] `SPEC_TRACE.md` updated (spec 22.5). A test (`tests/integration/spec_trace.rs`) checks that every file the trace names exists.
 - [x] `CLEAN_ROOM.md` provenance log updated for each contributor (spec 23.1). Entries added for each batch; each needs a human review.
-- [ ] Fuzz targets: tokenizer, stylesheet, selector, declaration, var, calc, color (spec 22.3). Not written. Seeded randomized tests stand in for them (`tests/integration/property.rs`); those are deterministic, not coverage-guided fuzzing.
+- [~] Fuzz targets: tokenizer, stylesheet, selector, declaration, calc, and color (spec 22.3). Written in `fuzz/` as a separate package, so libfuzzer-sys is not in the engine's dependency tree. The targets type-check against the engine. They run in the `fuzz-smoke` CI job (Linux, nightly, 60 seconds each), not yet on a runner. The var and color-function targets are covered by the stylesheet target.
 - [~] Property-based tests (spec 22.4). Seeded generators cover specificity additivity, `:is()` and `:where()` equivalence, incremental restyle against a full resolve, custom property cycle termination, declaration round trips, hostile text, every arity of the `margin` shorthand, and the `calc`, `min`, `max`, and `clamp` definitions. Other shorthands and the other math functions are not covered yet.
 - [~] Performance targets measured (spec 21.1). Tokenizer throughput, static-tree restyle, and wide sibling lists are measured (`tests/integration/perf.rs`, ignored by default; numbers in DESIGN.md section 8). A wide list with `:nth-child()` and `+` now resolves in linear time: 8,000 siblings took 50 ms against 389 ms before the sibling index (4.2 times the time for 4 times the siblings, where quadratic would give about 16). Not measured: `~`, `:nth-of-type()`, and `:nth-child(of S)` on wide lists, which still walk the list.
 - [~] Bounds enforced (spec 20.3). Tokens, nesting, selector work and complexity, rule and declaration counts, input size, var depth, custom property cycles, the step budget, and stylesheet count (`max_stylesheets`, via `try_add_stylesheet`). Calc nesting is checked against `max_calc_depth` at declaration parse and after `var()` substitution. The value parser recurses up to 256, so the configured limit is the effective one.

@@ -455,6 +455,16 @@ engineering measurements, not claims about other machines (spec 21.1).
     output, as they are for Lab. The relative form `color(from ... xyz ...)` is not
     implemented.
 
+32. **Linux-only tooling runs in CI.** Fuzzing needs nightly Rust and the libFuzzer
+    runtime, which this machine does not have. The targets live in `fuzz/`, a
+    separate package with its own lockfile, so the engine's dependency tree stays
+    free of `libfuzzer-sys`. They type-check here. The `fuzz-smoke` job in
+    `.github/workflows/ci.yml` runs each for 60 seconds on `ubuntu-latest`.
+33. **WPT is out of scope for this architecture.** Most CSS tests are reftests,
+    which compare rendered pixels, and the rest are testharness tests that need a
+    JavaScript DOM with `getComputedStyle`. The engine has no renderer and no DOM
+    adapter. The item is closed, not deferred, until one of those exists.
+
 ### Still open
 
 - Scope proximity is implemented (decision 12). The order matches the Cascade 6 draft. `spec.txt` 13.3 was corrected in a39110c.
@@ -469,7 +479,7 @@ engineering measurements, not claims about other machines (spec 21.1).
   for selectors (the cutoff and the conservative rules are the current approach).
 - Fuzz targets and coverage-guided fuzzing. The randomized tests are seeded and
   deterministic, which is not the same thing.
-- The WPT subsuites, which need a separate checkout (spec 22.2).
+- The WPT subsuites are out of scope (decision 33).
 - Calc depth: the configured `max_calc_depth` is the effective limit (decision 13). The value parser recurses up to 256, the default component nesting limit.
 - `:nth-child(of S)` still tests each sibling, because its predicate depends on the
   matcher (decision 25).
