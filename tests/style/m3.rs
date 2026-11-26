@@ -1056,6 +1056,78 @@ fn text_decoration_thickness_grammar_and_shorthand_reset() {
 }
 
 #[test]
+fn border_radius_corner_accepts_one_or_two_values() {
+    let corner = |css: &str| longhands_of(css, &["border-top-left-radius"])[0].clone();
+    // Equal radii collapse to a single value.
+    assert_eq!(
+        corner("child { border-top-left-radius: 10px 10px }"),
+        Value::px(10.0)
+    );
+    assert_eq!(
+        corner("child { border-top-left-radius: 10px 20px }"),
+        Value::Elliptical {
+            horizontal: Box::new(Value::px(10.0)),
+            vertical: Box::new(Value::px(20.0)),
+        }
+    );
+    assert_eq!(
+        corner("child { border-top-left-radius: 10% 2px }"),
+        Value::Elliptical {
+            horizontal: Box::new(Value::Percentage(10.0)),
+            vertical: Box::new(Value::px(2.0)),
+        }
+    );
+    // Three values, and a negative radius, are invalid, so the initial value stays.
+    assert_eq!(
+        corner("child { border-top-left-radius: 1px 2px 3px }"),
+        Value::px(0.0)
+    );
+    assert_eq!(
+        corner("child { border-top-left-radius: -1px 2px }"),
+        Value::px(0.0)
+    );
+}
+
+#[test]
+fn border_radius_shorthand_with_a_slash_sets_each_corner() {
+    let props = [
+        "border-top-left-radius",
+        "border-top-right-radius",
+        "border-bottom-right-radius",
+        "border-bottom-left-radius",
+    ];
+    let elliptical = |h: f64, v: f64| Value::Elliptical {
+        horizontal: Box::new(Value::px(h)),
+        vertical: Box::new(Value::px(v)),
+    };
+    // Two horizontal values and one vertical value: the corners take the
+    // horizontal values in the usual 1-4 order, and the vertical is shared.
+    assert_eq!(
+        longhands_of("child { border-radius: 1px 2px / 3px }", &props),
+        vec![
+            elliptical(1.0, 3.0),
+            elliptical(2.0, 3.0),
+            elliptical(1.0, 3.0),
+            elliptical(2.0, 3.0),
+        ]
+    );
+    // Without a slash, every corner is circular.
+    assert_eq!(
+        longhands_of("child { border-radius: 5px }", &props),
+        vec![Value::px(5.0); 4]
+    );
+    // An empty side, or a second slash, is invalid, so the whole shorthand is dropped.
+    assert_eq!(
+        longhands_of("child { border-radius: 1px / }", &props),
+        vec![Value::px(0.0); 4]
+    );
+    assert_eq!(
+        longhands_of("child { border-radius: 1px / 2px / 3px }", &props),
+        vec![Value::px(0.0); 4]
+    );
+}
+
+#[test]
 fn text_decoration_shorthand_matches_its_longhands() {
     let props = [
         "text-decoration-line",
@@ -1365,10 +1437,14 @@ fn border_radius_expands_to_the_four_corners_in_clockwise_order() {
             &corners
         )
     );
-    // The elliptical `/` form is not supported, so the declaration is dropped.
+    // The `/` form sets the vertical radii, so each corner is elliptical.
+    let ellipse = Value::Elliptical {
+        horizontal: Box::new(Value::px(1.0)),
+        vertical: Box::new(Value::px(2.0)),
+    };
     assert_eq!(
         longhands_of("child { border-radius: 1px / 2px }", &corners),
-        longhands_of("child { }", &corners)
+        vec![ellipse.clone(), ellipse.clone(), ellipse.clone(), ellipse]
     );
 }
 

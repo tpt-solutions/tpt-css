@@ -185,6 +185,13 @@ pub(crate) fn compute_value(
             Value::px(clamp_px(ctx.parent_font_size * p / 100.0))
         }
         Value::LightDark(light, dark) => Value::Color(if ctx.dark { dark } else { light }),
+        Value::Elliptical {
+            horizontal,
+            vertical,
+        } => Value::Elliptical {
+            horizontal: Box::new(compute_value(id, grammar, *horizontal, ctx)),
+            vertical: Box::new(compute_value(id, grammar, *vertical, ctx)),
+        },
         Value::Calc(node) => compute_calc(&node, ctx, is_font_size, non_negative(grammar)),
         Value::Keyword("currentcolor") if matches!(grammar, Grammar::Color) => {
             let c = if id == ids::COLOR {

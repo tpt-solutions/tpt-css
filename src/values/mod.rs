@@ -102,6 +102,15 @@ pub enum Value {
     /// A `content` list with at least one `attr()`. Computed values replace
     /// it with [`Value::Strings`].
     Content(Vec<ContentItem>),
+    /// An elliptical corner radius, with different horizontal and vertical
+    /// radii (`border-radius: 10px / 20px`). Equal radii are stored as one
+    /// value, so this variant always has two different parts.
+    Elliptical {
+        /// Horizontal radius.
+        horizontal: Box<Value>,
+        /// Vertical radius.
+        vertical: Box<Value>,
+    },
     /// A `light-dark(light, dark)` color pair, resolved at computed-value time
     /// from the color scheme (CSS Color 5).
     LightDark(Color, Color),

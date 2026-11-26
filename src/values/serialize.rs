@@ -51,6 +51,14 @@ pub fn serialize_value(value: &Value) -> String {
             })
             .collect::<Vec<_>>()
             .join(" "),
+        Value::Elliptical {
+            horizontal,
+            vertical,
+        } => format!(
+            "{} {}",
+            serialize_value(horizontal),
+            serialize_value(vertical)
+        ),
         Value::Calc(node) => calc::serialize(node),
     }
 }

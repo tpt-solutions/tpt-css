@@ -102,6 +102,7 @@ pub fn parse_property_value(
         }),
         Grammar::Content => keyword(values, &["normal", "none"]).or_else(|| parse_content(values)),
         Grammar::Opacity => number_or_percent(values).map(|v| Value::Number(v.clamp(0.0, 1.0))),
+        Grammar::BorderRadius => parse_border_radius(values),
         Grammar::Integer { keywords } => {
             keyword(values, keywords).or_else(|| integer(values).map(|n| Value::Number(n as f64)))
         }
@@ -204,6 +205,32 @@ fn parse_font_family(values: &[ComponentValue]) -> Option<Value> {
 }
 
 /// One or more strings, separated by whitespace (the `content` grammar).
+/// One or two non-negative lengths or percentages: horizontal, then vertical.
+/// Equal values collapse to one, so a circular radius is a plain value.
+fn parse_border_radius(values: &[ComponentValue]) -> Option<Value> {
+    let parts = crate::syntax::trim_whitespace(values);
+    let chunks: Vec<&[ComponentValue]> = parts
+        .split(|v| v.is_whitespace())
+        .filter(|c| !c.is_empty())
+        .collect();
+    match chunks.as_slice() {
+        [one] => parse_length_percentage(one, true, true),
+        [h, v] => {
+            let horizontal = parse_length_percentage(h, true, true)?;
+            let vertical = parse_length_percentage(v, true, true)?;
+            Some(if horizontal == vertical {
+                horizontal
+            } else {
+                Value::Elliptical {
+                    horizontal: Box::new(horizontal),
+                    vertical: Box::new(vertical),
+                }
+            })
+        }
+        _ => None,
+    }
+}
+
 fn parse_content(values: &[ComponentValue]) -> Option<Value> {
     let mut out = Vec::new();
     let mut has_attr = false;
