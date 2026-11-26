@@ -49,6 +49,7 @@ impl StyleResolver {
         node: NodeId,
         env: &Environment,
     ) -> Vec<Inspection> {
+        self.siblings.clear();
         let active = self.active_rules(env);
         let mut targets = self.cascade(tree, node, &active);
         let cascaded = targets.remove(&None).unwrap_or_else(Cascaded::new);

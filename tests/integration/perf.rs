@@ -101,3 +101,37 @@ fn perf_fixtures_are_well_formed() {
     let _ = t.element(t.root(), "div");
     let _ = parse_sheet("div { margin-left: 1px }");
 }
+
+/// Full resolve of a wide list with structural rules. Each sibling needs its
+/// position, so a matcher that walks the siblings for every element would take
+/// time that grows as the square of the list length. Time is printed for two
+/// sizes; quadratic growth shows as about 16 times the time for 4 times the list.
+#[test]
+#[ignore]
+fn wide_sibling_list_with_structural_rules() {
+    let css = "li:nth-child(odd) { margin-left: 1px } li + li { color: red }";
+    let mut timings = Vec::new();
+    for n in [2_000usize, 8_000] {
+        let mut t = TestTree::new(NodeKind::Element);
+        let root = t.root();
+        t.nodes[0].name.local = "ul".into();
+        for _ in 0..n {
+            t.element(root, "li");
+        }
+        let mut resolver = StyleResolver::new(ResolverConfig::default());
+        resolver.add_stylesheet(parse_sheet(css).stylesheet, Origin::Author);
+        let start = Instant::now();
+        let map = resolver.resolve(&t, &Environment::default());
+        let elapsed = start.elapsed();
+        // The first li is odd and first, so it gets the margin and no red color.
+        let first = *t.children(root).first().expect("a child");
+        assert_eq!(
+            map.get(first).map(|s| s.color()),
+            Some(tpt_css::values::Color::BLACK)
+        );
+        timings.push((n, elapsed));
+        println!("{n} siblings: full resolve {elapsed:?}");
+    }
+    let ratio = timings[1].1.as_secs_f64() / timings[0].1.as_secs_f64().max(1e-9);
+    println!("time ratio for 4x the siblings: {ratio:.1} (quadratic would be about 16)");
+}

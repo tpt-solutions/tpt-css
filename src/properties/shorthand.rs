@@ -9,13 +9,16 @@
 //!
 //! M1 shorthands: `margin`, `padding`, `border`, `border-width`,
 //! `border-style`, `border-color`, the four `border-<side>` shorthands, and
-//! `background`, which covers only `background-color`. `font`, `list-style`,
-//! `text-decoration`, and `background` with images are not implemented; a
+//! `background`, which covers only `background-color`. `font` and `list-style`
+//! are implemented, without `font-variant`, `font-stretch`, system fonts, or
+//! list-style images other than `none`. `text-decoration` is not implemented,
+//! and neither is `background` with images; a
 //! declaration that uses them is dropped.
 
 use super::parse::{parse_property_value, CssWide, InvalidValue, SpecifiedValue};
 use super::registry::{lookup, spec, Initial};
 use crate::syntax::{ComponentValue, TokenKind};
+use crate::values::Value;
 
 /// One longhand value produced by an expansion.
 pub type Expanded = Vec<(&'static str, SpecifiedValue)>;
@@ -141,7 +144,261 @@ pub const SHORTHANDS: &[ShorthandSpec] = &[
         longhands: &["background-color"],
         expand: background,
     },
+    ShorthandSpec {
+        name: "font",
+        longhands: &[
+            "font-style",
+            "font-weight",
+            "font-size",
+            "line-height",
+            "font-family",
+        ],
+        expand: font,
+    },
+    ShorthandSpec {
+        name: "list-style",
+        longhands: &["list-style-type", "list-style-position", "list-style-image"],
+        expand: list_style,
+    },
+    ShorthandSpec {
+        name: "text-decoration",
+        longhands: &[
+            "text-decoration-line",
+            "text-decoration-style",
+            "text-decoration-color",
+        ],
+        expand: text_decoration,
+    },
 ];
+
+/// `font: [style] [weight] size [/ line-height] family` (CSS Fonts 4 section 4.3).
+///
+/// Only `font-style`, `font-weight`, `font-size`, `line-height`, and
+/// `font-family` are registered, so `font-variant` and `font-stretch` are not
+/// accepted here, and the system font keywords (`caption`, `menu`, and the
+/// others) are not supported. Omitted style and weight take their initial
+/// value, and an omitted line height resets to `normal`, as the shorthand requires.
+fn font(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> {
+    let values = crate::syntax::trim_whitespace(values);
+    let items: Vec<(usize, &ComponentValue)> = values
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| !v.is_whitespace())
+        .collect();
+    let mut style = None;
+    let mut weight = None;
+    let mut k = 0;
+    // Style and weight come before the size, in either order.
+    let size = loop {
+        let item = items.get(k).ok_or(InvalidValue)?.1;
+        if let Ok(size) = parse_as("font-size", std::slice::from_ref(item)) {
+            if matches!(size, SpecifiedValue::CssWide(_)) {
+                return Err(InvalidValue);
+            }
+            break size;
+        }
+        if style.is_none() {
+            if let Ok(v) = parse_as("font-style", std::slice::from_ref(item)) {
+                if !matches!(v, SpecifiedValue::CssWide(_)) {
+                    style = Some(v);
+                    k += 1;
+                    continue;
+                }
+            }
+        }
+        if weight.is_none() {
+            if let Ok(v) = parse_as("font-weight", std::slice::from_ref(item)) {
+                if !matches!(v, SpecifiedValue::CssWide(_)) {
+                    weight = Some(v);
+                    k += 1;
+                    continue;
+                }
+            }
+        }
+        return Err(InvalidValue);
+    };
+    k += 1;
+    let mut line_height = SpecifiedValue::Value(Initial::Keyword("normal").to_value());
+    if let Some((_, item)) = items.get(k) {
+        if item.is_token(&TokenKind::Delim('/')) {
+            let (_, lh) = *items.get(k + 1).ok_or(InvalidValue)?;
+            line_height = parse_as("line-height", std::slice::from_ref(lh))?;
+            if matches!(line_height, SpecifiedValue::CssWide(_)) {
+                return Err(InvalidValue);
+            }
+            k += 2;
+        }
+    }
+    let (start, _) = *items.get(k).ok_or(InvalidValue)?;
+    let family = parse_as("font-family", &values[start..])?;
+    if matches!(family, SpecifiedValue::CssWide(_)) {
+        return Err(InvalidValue);
+    }
+    Ok(vec![
+        (
+            "font-style",
+            style.unwrap_or(SpecifiedValue::Value(Initial::Keyword("normal").to_value())),
+        ),
+        (
+            "font-weight",
+            weight.unwrap_or(SpecifiedValue::Value(Initial::Keyword("normal").to_value())),
+        ),
+        ("font-size", size),
+        ("line-height", line_height),
+        ("font-family", family),
+    ])
+}
+
+/// `list-style: [position || image || type]` (CSS Lists 3 section 3). A lone
+/// `none` sets both the type and the image to `none`.
+fn list_style(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> {
+    let parts = chunks(values);
+    if parts.is_empty() || parts.len() > 3 {
+        return Err(InvalidValue);
+    }
+    let mut position = None;
+    let mut image = None;
+    let mut kind = None;
+    for part in &parts {
+        let mut placed = false;
+        if position.is_none() {
+            if let Ok(v) = parse_as("list-style-position", part) {
+                position = Some(v);
+                placed = true;
+            }
+        }
+        if !placed && kind.is_none() {
+            if let Ok(v) = parse_as("list-style-type", part) {
+                kind = Some(v);
+                placed = true;
+            }
+        }
+        if !placed && image.is_none() {
+            if let Ok(v) = parse_as("list-style-image", part) {
+                image = Some(v);
+                placed = true;
+            }
+        }
+        if !placed {
+            return Err(InvalidValue);
+        }
+    }
+    let initial = |name: &str| {
+        let id = lookup(name).expect("registered");
+        match spec(id).initial {
+            Initial::Keyword(k) => SpecifiedValue::Value(Initial::Keyword(k).to_value()),
+            _ => unreachable!("list-style initial values are keywords"),
+        }
+    };
+    if let [only] = parts.as_slice() {
+        if chunks_is_none(only) {
+            return Ok(vec![
+                (
+                    "list-style-type",
+                    SpecifiedValue::Value(Initial::Keyword("none").to_value()),
+                ),
+                ("list-style-position", initial("list-style-position")),
+                (
+                    "list-style-image",
+                    SpecifiedValue::Value(Initial::Keyword("none").to_value()),
+                ),
+            ]);
+        }
+    }
+    Ok(vec![
+        (
+            "list-style-type",
+            kind.unwrap_or_else(|| initial("list-style-type")),
+        ),
+        (
+            "list-style-position",
+            position.unwrap_or_else(|| initial("list-style-position")),
+        ),
+        (
+            "list-style-image",
+            image.unwrap_or_else(|| initial("list-style-image")),
+        ),
+    ])
+}
+
+fn chunks_is_none(part: &[ComponentValue]) -> bool {
+    matches!(part, [ComponentValue::Token(t)] if matches!(&t.kind, TokenKind::Ident(s) if s.eq_ignore_ascii_case("none")))
+}
+
+/// `text-decoration: <line> || <style> || <color>` (CSS Text Decoration 3). The
+/// line keywords may be spread over several chunks. `none` is a line on its
+/// own, so it cannot be combined with another line keyword.
+fn text_decoration(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> {
+    let parts = chunks(values);
+    if parts.is_empty() {
+        return Err(InvalidValue);
+    }
+    let mut bits = 0u8;
+    let mut saw_none = false;
+    let mut style = None;
+    let mut color = None;
+    for part in &parts {
+        if let [ComponentValue::Token(t)] = part {
+            if let TokenKind::Ident(word) = &t.kind {
+                if word.eq_ignore_ascii_case("none") {
+                    if saw_none {
+                        return Err(InvalidValue);
+                    }
+                    saw_none = true;
+                    continue;
+                }
+                if let Some(bit) = super::parse::decoration_line_bit(word) {
+                    if bits & bit != 0 {
+                        return Err(InvalidValue);
+                    }
+                    bits |= bit;
+                    continue;
+                }
+            }
+        }
+        if style.is_none() {
+            if let Ok(v) = parse_as("text-decoration-style", part) {
+                style = Some(v);
+                continue;
+            }
+        }
+        if color.is_none() {
+            if let Ok(v) = parse_as("text-decoration-color", part) {
+                color = Some(v);
+                continue;
+            }
+        }
+        return Err(InvalidValue);
+    }
+    if saw_none && bits != 0 {
+        return Err(InvalidValue);
+    }
+    let line = if bits == 0 {
+        "none"
+    } else {
+        crate::properties::registry::TEXT_DECORATION_LINE_VALUES[usize::from(bits)]
+    };
+    Ok(vec![
+        (
+            "text-decoration-line",
+            SpecifiedValue::Value(Value::Keyword(line)),
+        ),
+        (
+            "text-decoration-style",
+            style.unwrap_or_else(|| initial_value("text-decoration-style")),
+        ),
+        (
+            "text-decoration-color",
+            color.unwrap_or_else(|| initial_value("text-decoration-color")),
+        ),
+    ])
+}
+
+/// The initial value of a longhand, as a specified value.
+fn initial_value(name: &str) -> SpecifiedValue {
+    let id = lookup(name).expect("registered");
+    SpecifiedValue::Value(spec(id).initial.to_value())
+}
 
 /// Looks up a shorthand by name (already lowercased).
 pub fn shorthand_index(name: &str) -> Option<usize> {

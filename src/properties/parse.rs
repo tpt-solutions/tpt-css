@@ -95,6 +95,11 @@ pub fn parse_property_value(
         Grammar::FontWeight => keyword(values, &["normal", "bold", "bolder", "lighter"])
             .or_else(|| number(values, |v| (1.0..=1000.0).contains(&v)).map(Value::Number)),
         Grammar::FontFamily => parse_font_family(values),
+        Grammar::TextDecorationLine => parse_decoration_line(values),
+        Grammar::Length { keywords } => keyword(values, keywords).or_else(|| {
+            parse_length_percentage(values, false, true)
+                .filter(|v| matches!(v, Value::Length { .. }))
+        }),
         Grammar::Content => keyword(values, &["normal", "none"]).or_else(|| parse_strings(values)),
         Grammar::Opacity => number_or_percent(values).map(|v| Value::Number(v.clamp(0.0, 1.0))),
         Grammar::Integer { keywords } => {
@@ -230,4 +235,51 @@ fn parse_light_dark(values: &[ComponentValue]) -> Option<Value> {
     let light = parse_color(trim_whitespace(light))?;
     let dark = parse_color(trim_whitespace(dark))?;
     Some(Value::LightDark(light, dark))
+}
+
+/// The bit for a `text-decoration-line` keyword, as used by
+/// [`TEXT_DECORATION_LINE_VALUES`]. `None` for anything else, including `none`.
+pub(crate) fn decoration_line_bit(word: &str) -> Option<u8> {
+    match word.to_ascii_lowercase().as_str() {
+        "underline" => Some(1),
+        "overline" => Some(2),
+        "line-through" => Some(4),
+        "blink" => Some(8),
+        _ => None,
+    }
+}
+
+/// `text-decoration-line`: `none`, or a set of the four line keywords. The set
+/// is stored as the keyword for its combination.
+fn parse_decoration_line(values: &[ComponentValue]) -> Option<Value> {
+    let words: Vec<&str> = values
+        .iter()
+        .filter(|v| !v.is_whitespace())
+        .map(|v| match v {
+            ComponentValue::Token(t) => match &t.kind {
+                TokenKind::Ident(s) => Some(s.as_str()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect::<Option<_>>()?;
+    if let [only] = words.as_slice() {
+        if only.eq_ignore_ascii_case("none") {
+            return Some(Value::Keyword("none"));
+        }
+    }
+    let mut bits = 0u8;
+    for word in words {
+        let bit = decoration_line_bit(word)?;
+        if bits & bit != 0 {
+            return None;
+        }
+        bits |= bit;
+    }
+    if bits == 0 {
+        return None;
+    }
+    Some(Value::Keyword(
+        crate::properties::registry::TEXT_DECORATION_LINE_VALUES[usize::from(bits)],
+    ))
 }

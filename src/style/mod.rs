@@ -14,6 +14,7 @@ pub mod inspect;
 pub mod invalidation;
 pub mod keyframes;
 pub mod resolver;
+pub(crate) mod rule_index;
 
 pub use computed::{ComputedStyle, StyleMap};
 pub use custom::CustomPropertyValue;

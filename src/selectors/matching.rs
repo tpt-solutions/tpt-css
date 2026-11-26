@@ -13,8 +13,14 @@
 //! anchor element, so its leftmost compound is checked against that anchor.
 //!
 //! Structural pseudo-classes read element siblings through the tree contract.
-//! Each such check scans the sibling list, so wide trees cost O(siblings) per
-//! node. An index is M3 work (see TODO.md).
+//! A [`SiblingCache`] holds each parent's element children and their positions,
+//! built once per style pass, so `:nth-child()` and `+` cost O(log siblings) per
+//! node. Without a cache, the matcher builds the same index for each check.
+//! `~`, `:nth-of-type()`, and `:nth-child(... of S)` still walk the list.
+
+use std::cell::RefCell;
+use std::collections::BTreeMap;
+use std::rc::Rc;
 
 use crate::ast::selector::{
     AttributeOperator, Combinator, ComplexSelector, CompoundSelector, NthSelector, PseudoClass,
@@ -56,6 +62,7 @@ pub fn matches_complex<T: StyleTree>(
         tree,
         budget: *budget,
         scope: None,
+        siblings: None,
     };
     let result = matcher.matches(node, selector);
     *budget = matcher.budget;
@@ -67,6 +74,53 @@ pub struct Matcher<'a, T: StyleTree> {
     tree: &'a T,
     budget: usize,
     scope: Option<NodeId>,
+    siblings: Option<&'a SiblingCache>,
+}
+
+/// The element children of one parent, with the position of each.
+struct Siblings {
+    elements: Vec<NodeId>,
+    positions: BTreeMap<NodeId, usize>,
+}
+
+impl Siblings {
+    fn of<T: StyleTree>(tree: &T, parent: NodeId) -> Siblings {
+        let elements: Vec<NodeId> = tree
+            .children(parent)
+            .iter()
+            .copied()
+            .filter(|c| tree.kind(*c) == NodeKind::Element)
+            .collect();
+        let positions = elements.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+        Siblings {
+            elements,
+            positions,
+        }
+    }
+}
+
+/// The sibling index of each parent, built on first use (spec 21.2). It is
+/// valid while the tree does not change, so the resolver clears it at the start
+/// of each style pass.
+#[derive(Default)]
+pub(crate) struct SiblingCache {
+    parents: RefCell<BTreeMap<NodeId, Rc<Siblings>>>,
+}
+
+impl SiblingCache {
+    /// Forgets every parent. Call this when the tree may have changed.
+    pub(crate) fn clear(&self) {
+        self.parents.borrow_mut().clear();
+    }
+
+    fn get<T: StyleTree>(&self, tree: &T, parent: NodeId) -> Rc<Siblings> {
+        if let Some(found) = self.parents.borrow().get(&parent) {
+            return Rc::clone(found);
+        }
+        let built = Rc::new(Siblings::of(tree, parent));
+        self.parents.borrow_mut().insert(parent, Rc::clone(&built));
+        built
+    }
 }
 
 /// The relation a leftmost compound must have to an anchor element.
@@ -83,6 +137,22 @@ impl<'a, T: StyleTree> Matcher<'a, T> {
             tree,
             budget: max_steps,
             scope,
+            siblings: None,
+        }
+    }
+
+    /// Like [`Matcher::new`], but sibling positions come from `siblings`.
+    pub(crate) fn cached(
+        tree: &'a T,
+        max_steps: usize,
+        scope: Option<NodeId>,
+        siblings: &'a SiblingCache,
+    ) -> Self {
+        Matcher {
+            tree,
+            budget: max_steps,
+            scope,
+            siblings: Some(siblings),
         }
     }
 
@@ -149,8 +219,8 @@ impl<'a, T: StyleTree> Matcher<'a, T> {
                 }
                 false
             }
-            Combinator::NextSibling => match self.previous_element_siblings(node).first() {
-                Some(&prev) => self.match_from(prev, selector, idx - 1, anchor),
+            Combinator::NextSibling => match self.previous_element(node) {
+                Some(prev) => self.match_from(prev, selector, idx - 1, anchor),
                 None => false,
             },
             Combinator::SubsequentSibling => {
@@ -181,46 +251,46 @@ impl<'a, T: StyleTree> Matcher<'a, T> {
                 }
                 false
             }
-            Combinator::NextSibling => {
-                self.previous_element_siblings(node).first() == Some(&anchor.node)
-            }
+            Combinator::NextSibling => self.previous_element(node) == Some(anchor.node),
             Combinator::SubsequentSibling => {
                 self.previous_element_siblings(node).contains(&anchor.node)
             }
         }
     }
 
-    /// All element siblings of `node` including itself, in document order. A
-    /// parentless node is its own only sibling.
-    fn element_siblings(&self, node: NodeId) -> Vec<NodeId> {
-        match self.tree.parent(node) {
-            None => vec![node],
-            Some(p) => self
-                .tree
-                .children(p)
-                .iter()
-                .copied()
-                .filter(|c| self.tree.kind(*c) == NodeKind::Element)
-                .collect(),
-        }
+    /// Runs `f` on the element siblings of `node` (itself included) and on the
+    /// index of `node` among them. A parentless node is its own only sibling.
+    /// Returns `None` if `node` is not an element child of its parent.
+    fn with_siblings<R>(&self, node: NodeId, f: impl FnOnce(&[NodeId], usize) -> R) -> Option<R> {
+        let Some(parent) = self.tree.parent(node) else {
+            return Some(f(&[node], 0));
+        };
+        let siblings = match self.siblings {
+            Some(cache) => cache.get(self.tree, parent),
+            None => Rc::new(Siblings::of(self.tree, parent)),
+        };
+        let pos = *siblings.positions.get(&node)?;
+        Some(f(&siblings.elements, pos))
+    }
+
+    /// The element sibling just before `node`, if any.
+    fn previous_element(&self, node: NodeId) -> Option<NodeId> {
+        self.with_siblings(node, |list, pos| pos.checked_sub(1).map(|p| list[p]))
+            .flatten()
     }
 
     /// Element siblings before `node`, nearest first.
     fn previous_element_siblings(&self, node: NodeId) -> Vec<NodeId> {
-        let sibs = self.element_siblings(node);
-        match sibs.iter().position(|s| *s == node) {
-            Some(pos) => sibs[..pos].iter().rev().copied().collect(),
-            None => Vec::new(),
-        }
+        self.with_siblings(node, |list, pos| {
+            list[..pos].iter().rev().copied().collect()
+        })
+        .unwrap_or_default()
     }
 
     /// Element siblings after `node`, nearest first.
     fn following_element_siblings(&self, node: NodeId) -> Vec<NodeId> {
-        let sibs = self.element_siblings(node);
-        match sibs.iter().position(|s| *s == node) {
-            Some(pos) => sibs[pos + 1..].to_vec(),
-            None => Vec::new(),
-        }
+        self.with_siblings(node, |list, pos| list[pos + 1..].to_vec())
+            .unwrap_or_default()
     }
 
     fn compound_matches(&mut self, node: NodeId, compound: &CompoundSelector) -> bool {
@@ -331,7 +401,28 @@ impl<'a, T: StyleTree> Matcher<'a, T> {
                 return false;
             }
         }
-        let mut sibs = self.element_siblings(node);
+        // The plain forms need only the position, so they use the index directly.
+        if nth.of.is_none() && !nth.of_type {
+            let position =
+                self.with_siblings(
+                    node,
+                    |list, pos| {
+                        if nth.last {
+                            list.len() - pos
+                        } else {
+                            pos + 1
+                        }
+                    },
+                );
+            return match position {
+                Some(p) => anb_matches(p as i64, nth.a, nth.b),
+                None => false,
+            };
+        }
+        let mut sibs = match self.with_siblings(node, |list, _| list.to_vec()) {
+            Some(list) => list,
+            None => return false,
+        };
         if nth.of_type {
             let name = self.tree.name(node).local.clone();
             sibs.retain(|s| self.tree.name(*s).local == name);

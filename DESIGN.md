@@ -318,7 +318,8 @@ These numbers come from the ignored tests in `tests/integration/perf.rs`, run wi
 `cargo test --release --test integration -- --ignored --nocapture`. They are
 engineering measurements, not claims about other machines (spec 21.1).
 
-- Tokenizer: about 9 to 10 million tokens per second (two runs).
+- Tokenizer: about 9 to 10 million tokens per second (two runs). Wide lists: 8,000
+  siblings with `:nth-child()` and `+` rules resolve in about 50 ms (decision 25).
 - Static tree of 10,000 elements: full resolve about 45 to 50 ms (two runs). A local restyle that
   changes one element with a subject-only rule restyles 1 element and takes about
   34 µs, since `restyle` returns a reference into the cache (decision 16). It was
@@ -381,6 +382,32 @@ engineering measurements, not claims about other machines (spec 21.1).
     nothing until the host reports the elements it considers defined. The
     functional forms, `:current(selector)` and the others, are not implemented.
 
+22. **Long-tail properties are registry rows.** Thirty-one rows were added after
+    the M1 and M2 set, and the ids of the existing rows did not change. Keywords
+    are lowercase, because the keyword grammar compares lowercased input.
+    `letter-spacing` and `word-spacing` use `Grammar::Length`, which rejects
+    percentages. It also rejects `calc()`, because the value is accepted only when
+    it is a plain length; that is conservative.
+23. **`font`, `list-style`, and `text-decoration` shorthands.** `font` reads style
+    and weight before the size, then `/ line-height`, then the family, and omitted
+    parts reset. `text-decoration-line` is stored as the keyword for its
+    combination, from a table of sixteen entries indexed by bitmask, because
+    `Value` has no list variant. `none` cannot be combined with another line keyword.
+24. **Explicit aliases** are listed in `properties/aliases.rs`. The only entry is
+    `word-wrap`, for `overflow-wrap`. Prefixed names are not stripped.
+25. **Selector candidates and the sibling index** (spec 21.2). The rule index files
+    each selector under its subject compound's id, class, or type, and a node is
+    checked only against its own keys and the unkeyed selectors. The sibling
+    cache holds each parent's element children and their positions for one style
+    pass, and it is cleared at the start of `resolve`, `restyle`, and `inspect`.
+    `:nth-child()` and `+` read a position in O(log n). `~`, `:nth-of-type()`, and
+    `:nth-child(of S)` still walk the sibling list. Measured: a list of 8,000
+    siblings with structural rules now resolves in about 50 ms, against 389 ms
+    before; the growth ratio for four times the siblings is 4.2, where quadratic
+    would be about 16.
+26. **MSRV.** The default `cargo test` passes on Rust 1.75.0, verified locally.
+    Earlier this was an unverified CI claim.
+
 ### Still open
 
 - Scope proximity is implemented (decision 12). The order matches the Cascade 6 draft. `spec.txt` 13.3 still needs correcting.
@@ -392,8 +419,14 @@ engineering measurements, not claims about other machines (spec 21.1).
 - Shadow DOM: `::part()`, `::slotted()`, `::highlight()`, `:host`, `:host-context()`.
 - Style sharing, a dependency graph for custom properties, and a dependency index
   for selectors (the cutoff and the conservative rules are the current approach).
-  `AttributeNamed` to skip attributes that no selector reads.
 - Fuzz targets and coverage-guided fuzzing. The randomized tests are seeded and
   deterministic, which is not the same thing.
 - The WPT subsuites, which need a separate checkout (spec 22.2).
 - Calc depth: the value parser keeps its own fixed bound of 32. The configured `max_calc_depth` is enforced on top of it (decision 13).
+- Sibling counting for `~`, `:nth-of-type()`, and `:nth-child(of S)` still walks the
+  sibling list (decision 25).
+- Long-tail properties still missing: multi-value grammars (`transition`, `flex`,
+  `grid`, `border-radius`, `box-shadow`), and angle, time, and resolution values.
+- Full resolve grew by roughly 35 to 60 percent in the runs here when the registry went from 50 to 80
+  properties, because every element computes every registered property. The
+  timings in this section were taken on a machine that varied between runs.

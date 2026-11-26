@@ -208,6 +208,10 @@ pub struct StyleResolver {
     /// Lowercased attribute names that some selector can read, computed on
     /// demand and reset when the sheets change (see `invalidation.rs`).
     pub(crate) attr_deps: Option<BTreeSet<String>>,
+    /// Selectors filed by subject key, rebuilt whenever the sheets change.
+    pub(crate) index: super::rule_index::RuleIndex,
+    /// Element sibling positions, cleared at the start of each style pass.
+    pub(crate) siblings: crate::selectors::matching::SiblingCache,
     pub(crate) last_restyled: usize,
     /// Cascade layers in order of first declaration (spec 13.4).
     pub(crate) layers: BTreeMap<String, usize>,
@@ -287,6 +291,7 @@ impl StyleResolver {
         self.flatten(sheet.rules, &FlattenCtx::default(), &mut rules);
         self.sheets.push(LoadedSheet { id, origin, rules });
         self.attr_deps = None;
+        self.index = super::rule_index::RuleIndex::build(&self.sheets);
         self.full_dirty = true;
         Ok(id)
     }
@@ -295,11 +300,13 @@ impl StyleResolver {
     pub fn remove_stylesheet(&mut self, id: SheetId) {
         self.sheets.retain(|s| s.id != id);
         self.attr_deps = None;
+        self.index = super::rule_index::RuleIndex::build(&self.sheets);
         self.full_dirty = true;
     }
 
     /// Computes styles for every element in `tree` (spec 8.2).
     pub fn resolve<T: StyleTree>(&mut self, tree: &T, env: &Environment) -> &StyleMap {
+        self.siblings.clear();
         let active = self.active_rules(env);
         let mut map = StyleMap::default();
         let limits = &self.config.limits;
@@ -407,51 +414,52 @@ impl StyleResolver {
         let mut out: BTreeMap<Option<PseudoElement>, Cascaded> = BTreeMap::new();
         let max_steps = self.config.limits.max_match_steps;
 
-        for (sheet_pos, sheet) in self.sheets.iter().enumerate() {
-            for (rule_idx, rule) in sheet.rules.iter().enumerate() {
-                if !active[sheet_pos][rule_idx]
-                    || !self.containers_match(tree, node, &rule.containers)
-                {
-                    continue;
-                }
-                let Some(scope) = scope_for(tree, node, &rule.scopes, max_steps) else {
-                    continue;
-                };
-                let proximity = scope_proximity(tree, node, scope);
-                for (sel_idx, selector) in rule.selectors.selectors.iter().enumerate() {
-                    let uses_visited = rule.visited.get(sel_idx).copied().unwrap_or(false);
-                    if uses_visited && self.config.visited == VisitedPolicy::Disabled {
-                        continue;
-                    }
-                    let mut matcher = Matcher::new(tree, max_steps, scope);
-                    if !matcher.matches(node, selector) {
-                        continue;
-                    }
-                    let cas = out
-                        .entry(selector.pseudo_element.clone())
-                        .or_insert_with(Cascaded::new);
-                    for (decl_idx, decl) in rule.decls.iter().enumerate() {
-                        if uses_visited && visited_restricted(&decl.target) {
-                            continue;
-                        }
-                        let key = CascadeKey {
-                            origin: sheet.origin,
-                            important: decl.important,
-                            layer: layer_key(rule.layer, decl.important),
-                            scope_proximity: proximity,
-                            inline: false,
-                            specificity: selector.specificity,
-                            order: DeclarationOrder {
-                                sheet: sheet_pos as u32,
-                                rule: rule_idx as u32,
-                                declaration: decl_idx as u32,
-                            },
-                        };
-                        cas.offer(&decl.target, &decl.value, key);
-                    }
-                }
+        self.index.for_each_candidate(tree, node, |c| {
+            let sheet_pos = c.sheet;
+            let rule_idx = c.rule;
+            let sheet = &self.sheets[sheet_pos];
+            let rule = &sheet.rules[rule_idx];
+            if !active[sheet_pos][rule_idx] || !self.containers_match(tree, node, &rule.containers)
+            {
+                return;
             }
-        }
+            let Some(scope) = scope_for(tree, node, &rule.scopes, max_steps) else {
+                return;
+            };
+            let proximity = scope_proximity(tree, node, scope);
+            let sel_idx = c.selector;
+            let selector = &rule.selectors.selectors[sel_idx];
+            let uses_visited = rule.visited.get(sel_idx).copied().unwrap_or(false);
+            if uses_visited && self.config.visited == VisitedPolicy::Disabled {
+                return;
+            }
+            let mut matcher = Matcher::cached(tree, max_steps, scope, &self.siblings);
+            if !matcher.matches(node, selector) {
+                return;
+            }
+            let cas = out
+                .entry(selector.pseudo_element.clone())
+                .or_insert_with(Cascaded::new);
+            for (decl_idx, decl) in rule.decls.iter().enumerate() {
+                if uses_visited && visited_restricted(&decl.target) {
+                    continue;
+                }
+                let key = CascadeKey {
+                    origin: sheet.origin,
+                    important: decl.important,
+                    layer: layer_key(rule.layer, decl.important),
+                    scope_proximity: proximity,
+                    inline: false,
+                    specificity: selector.specificity,
+                    order: DeclarationOrder {
+                        sheet: sheet_pos as u32,
+                        rule: rule_idx as u32,
+                        declaration: decl_idx as u32,
+                    },
+                };
+                cas.offer(&decl.target, &decl.value, key);
+            }
+        });
 
         if let Some(inline) = tree.inline_style(node) {
             let cas = out.entry(None).or_insert_with(Cascaded::new);

@@ -826,3 +826,297 @@ fn host_reported_state_pseudo_classes_match_only_when_set() {
         );
     }
 }
+
+// ---- long-tail properties (spec 15.2) ----------------------------------------------
+
+fn keyword_of(css: &str, prop: &str) -> Value {
+    let (t, _, child) = chain();
+    let map = style_with(css, &t);
+    style_of(&map, child).raw(lookup(prop).unwrap()).clone()
+}
+
+#[test]
+fn long_tail_keywords_parse_and_reject_unknown_values() {
+    assert_eq!(
+        keyword_of("child { cursor: pointer }", "cursor"),
+        Value::Keyword("pointer")
+    );
+    assert_eq!(
+        keyword_of("child { cursor: POINTER }", "cursor"),
+        Value::Keyword("pointer")
+    );
+    assert_eq!(
+        keyword_of("child { float: left }", "float"),
+        Value::Keyword("left")
+    );
+    assert_eq!(
+        keyword_of("child { object-fit: cover }", "object-fit"),
+        Value::Keyword("cover")
+    );
+    // Unknown keywords are dropped, so the initial value remains.
+    assert_eq!(
+        keyword_of("child { float: middle }", "float"),
+        Value::Keyword("none")
+    );
+    assert_eq!(
+        keyword_of("child { cursor: sparkle }", "cursor"),
+        Value::Keyword("auto")
+    );
+}
+
+#[test]
+fn inherited_long_tail_properties_follow_the_table() {
+    let (t, root, child) = chain();
+    let mut t = t;
+    let grand = t.element(child, "grand");
+    let _ = root;
+    let map = style_with(
+        "child { cursor: help; text-transform: uppercase; float: right; pointer-events: none }",
+        &t,
+    );
+    // Inherited: cursor, text-transform, and pointer-events reach the grandchild.
+    assert_eq!(
+        style_of(&map, grand).raw(lookup("cursor").unwrap()),
+        &Value::Keyword("help")
+    );
+    assert_eq!(
+        style_of(&map, grand).raw(lookup("text-transform").unwrap()),
+        &Value::Keyword("uppercase")
+    );
+    assert_eq!(
+        style_of(&map, grand).raw(lookup("pointer-events").unwrap()),
+        &Value::Keyword("none")
+    );
+    // Not inherited: float stays at its initial value on the grandchild.
+    assert_eq!(
+        style_of(&map, grand).raw(lookup("float").unwrap()),
+        &Value::Keyword("none")
+    );
+}
+
+#[test]
+fn text_indent_takes_lengths_and_percentages_including_negative() {
+    assert_eq!(
+        keyword_of("child { text-indent: -4px }", "text-indent"),
+        Value::px(-4.0)
+    );
+    assert!(matches!(
+        keyword_of("child { text-indent: 10% }", "text-indent"),
+        Value::Length { .. } | Value::Percentage(_)
+    ));
+}
+
+// ---- font and list-style shorthands (CSS Fonts 4, CSS Lists 3) -------------------
+
+fn longhands_of(css: &str, props: &[&str]) -> Vec<Value> {
+    let (t, _, child) = chain();
+    let map = style_with(css, &t);
+    props
+        .iter()
+        .map(|p| style_of(&map, child).raw(lookup(p).unwrap()).clone())
+        .collect()
+}
+
+const FONT_LONGHANDS: [&str; 5] = [
+    "font-style",
+    "font-weight",
+    "font-size",
+    "line-height",
+    "font-family",
+];
+
+#[test]
+fn font_shorthand_matches_its_longhands() {
+    let shorthand = longhands_of(
+        "child { font: italic bold 16px/1.5 \"Helvetica Neue\", sans-serif }",
+        &FONT_LONGHANDS,
+    );
+    let longhand = longhands_of(
+        "child { font-style: italic; font-weight: bold; font-size: 16px; line-height: 1.5; font-family: \"Helvetica Neue\", sans-serif }",
+        &FONT_LONGHANDS,
+    );
+    assert_eq!(shorthand, longhand);
+}
+
+#[test]
+fn font_shorthand_resets_omitted_parts_and_accepts_spaced_slash() {
+    // Omitted style and weight, and the line height, reset to their initial values.
+    let shorthand = longhands_of("child { font: 12px serif }", &FONT_LONGHANDS);
+    let longhand = longhands_of(
+        "child { font-style: normal; font-weight: normal; font-size: 12px; line-height: normal; font-family: serif }",
+        &FONT_LONGHANDS,
+    );
+    assert_eq!(shorthand, longhand);
+    let spaced = longhands_of("child { font: 12px / 2 serif }", &FONT_LONGHANDS);
+    assert_eq!(
+        spaced[3],
+        longhands_of("child { line-height: 2 }", &["line-height"])[0]
+    );
+}
+
+#[test]
+fn font_shorthand_without_a_family_is_dropped() {
+    let dropped = longhands_of("child { font: 12px }", &["font-size"]);
+    assert_eq!(dropped, longhands_of("child { }", &["font-size"]));
+}
+
+#[test]
+fn list_style_shorthand_matches_its_longhands() {
+    let props = ["list-style-type", "list-style-position", "list-style-image"];
+    assert_eq!(
+        longhands_of("child { list-style: inside square }", &props),
+        longhands_of(
+            "child { list-style-position: inside; list-style-type: square; list-style-image: none }",
+            &props
+        )
+    );
+    // A lone `none` sets both the type and the image.
+    assert_eq!(
+        longhands_of("child { list-style: none }", &props),
+        longhands_of(
+            "child { list-style-type: none; list-style-image: none; list-style-position: outside }",
+            &props
+        )
+    );
+}
+
+#[test]
+fn explicit_aliases_resolve_and_prefixes_are_not_stripped() {
+    // `word-wrap` is an explicit alias of `overflow-wrap`.
+    assert_eq!(
+        longhands_of("child { word-wrap: break-word }", &["overflow-wrap"]),
+        longhands_of("child { overflow-wrap: break-word }", &["overflow-wrap"])
+    );
+    // Vendor prefixes are not stripped: `-webkit-overflow-wrap` is not a property here.
+    assert_eq!(
+        longhands_of(
+            "child { -webkit-overflow-wrap: break-word }",
+            &["overflow-wrap"]
+        ),
+        longhands_of("child { }", &["overflow-wrap"])
+    );
+}
+
+// ---- text-decoration and spacing (CSS Text Decoration 3, CSS Text 3) ---------------
+
+#[test]
+fn text_decoration_line_stores_the_set_in_spec_order() {
+    let line = |css: &str| longhands_of(css, &["text-decoration-line"])[0].clone();
+    assert_eq!(
+        line("child { text-decoration-line: line-through underline }"),
+        Value::Keyword("underline line-through")
+    );
+    assert_eq!(
+        line("child { text-decoration-line: blink }"),
+        Value::Keyword("blink")
+    );
+    // `none` cannot be combined with another line keyword, and duplicates are invalid.
+    assert_eq!(
+        line("child { text-decoration-line: none underline }"),
+        Value::Keyword("none")
+    );
+    assert_eq!(
+        line("child { text-decoration-line: underline underline }"),
+        Value::Keyword("none")
+    );
+}
+
+#[test]
+fn text_decoration_shorthand_matches_its_longhands() {
+    let props = [
+        "text-decoration-line",
+        "text-decoration-style",
+        "text-decoration-color",
+    ];
+    assert_eq!(
+        longhands_of("child { text-decoration: overline red wavy }", &props),
+        longhands_of(
+            "child { text-decoration-line: overline; text-decoration-style: wavy; text-decoration-color: red }",
+            &props
+        )
+    );
+    // Omitted parts reset to their initial values.
+    assert_eq!(
+        longhands_of("child { text-decoration: underline }", &props),
+        longhands_of(
+            "child { text-decoration-line: underline; text-decoration-style: solid; text-decoration-color: currentcolor }",
+            &props
+        )
+    );
+    // Two line keywords split across chunks still form one set.
+    assert_eq!(
+        longhands_of("child { text-decoration: underline blink }", &props)[0],
+        Value::Keyword("underline blink")
+    );
+}
+
+#[test]
+fn letter_and_word_spacing_take_lengths_but_not_percentages() {
+    assert_eq!(
+        longhands_of("child { letter-spacing: 2px }", &["letter-spacing"])[0],
+        Value::px(2.0)
+    );
+    assert_eq!(
+        longhands_of("child { letter-spacing: -1px }", &["letter-spacing"])[0],
+        Value::px(-1.0)
+    );
+    assert_eq!(
+        longhands_of("child { word-spacing: 10% }", &["word-spacing"])[0],
+        Value::Keyword("normal")
+    );
+    assert_eq!(
+        longhands_of("child { word-spacing: normal }", &["word-spacing"])[0],
+        Value::Keyword("normal")
+    );
+}
+
+// ---- rule index (spec 21.2): every subject shape is still matched -----------------
+
+#[test]
+fn every_subject_shape_is_found_by_the_index() {
+    let mut t = TestTree::new(NodeKind::Element);
+    let root = t.root();
+    t.nodes[0].name.local = "root".into();
+    let child = t.element(root, "child");
+    t.set_id(child, "x");
+    t.add_class(child, "a");
+    t.add_class(child, "a");
+    t.add_class(child, "b");
+    let css = "
+        child#x.a { margin-left: 1px }
+        .b { margin-top: 2px }
+        :is(.a) { margin-right: 3px }
+        * { margin-bottom: 4px }
+        #x { padding-left: 5px }
+        child.b { padding-top: 6px }
+        .zz { padding-right: 7px }
+    ";
+    let map = style_with(css, &t);
+    let s = style_of(&map, child);
+    assert!(
+        px_near(s.raw(lookup("margin-left").unwrap()), 1.0),
+        "id, class, and type"
+    );
+    assert!(
+        px_near(s.raw(lookup("margin-top").unwrap()), 2.0),
+        "class subject"
+    );
+    assert!(
+        px_near(s.raw(lookup("margin-right").unwrap()), 3.0),
+        "unkeyed :is() subject"
+    );
+    assert!(
+        px_near(s.raw(lookup("margin-bottom").unwrap()), 4.0),
+        "universal subject"
+    );
+    assert!(
+        px_near(s.raw(lookup("padding-left").unwrap()), 5.0),
+        "id subject"
+    );
+    assert!(
+        px_near(s.raw(lookup("padding-top").unwrap()), 6.0),
+        "type with class"
+    );
+    // A class the node does not have must not match.
+    assert!(!px_near(s.raw(lookup("padding-right").unwrap()), 7.0));
+}

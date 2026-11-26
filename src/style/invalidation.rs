@@ -146,6 +146,7 @@ impl StyleResolver {
         // Move the cached map out and work on it in place, then put it back. The
         // caller borrows it from the cache, so nothing is copied.
         let mut map = self.cache.take().map(|c| c.map).unwrap_or_default();
+        self.siblings.clear();
         let active = self.active_rules(env);
         let limits = &self.config.limits;
         let dirty: Vec<NodeId> = std::mem::take(&mut self.dirty).into_iter().collect();

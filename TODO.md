@@ -21,7 +21,7 @@ Legend: `[ ]` not started, `[~]` in progress or partly done (the note says what 
 - [x] Add `SPEC_TRACE.md` skeleton, section -> module -> tests (spec 22.5)
 - [x] Add `deny.toml` with license and ban rules (spec 23.3). Deny Apache-only licenses for dependencies, allow only dependencies that offer MIT (`MIT` or `MIT OR Apache-2.0`). `cargo deny check licenses bans` passes.
 - [x] Add `.gitignore` for Rust (`target/`)
-- [x] Decide Rust toolchain version and add `rust-toolchain.toml` (MSRV). Decided: `stable` for development, MSRV 1.75 in `Cargo.toml`. CI runs the MSRV job. The MSRV job has not been run locally (1.75 is not installed here).
+- [x] Decide Rust toolchain version and add `rust-toolchain.toml` (MSRV). Decided: `stable` for development, MSRV 1.75 in `Cargo.toml`. CI runs the MSRV job. Verified locally with Rust 1.75.0: the default `cargo test` passes. The CI MSRV job runs that same command.
 - [x] Create `Cargo.toml` with dual license field `MIT OR Apache-2.0`, zero dependencies (spec 6, 7, 23.2)
 - [x] Create `src/lib.rs` with `#![forbid(unsafe_code)]` (spec 23.3)
 - [x] Add every first-party file header `// SPDX-License-Identifier: MIT OR Apache-2.0` (spec 23.2). Checked: all 50 `.rs` files.
@@ -69,7 +69,7 @@ All decisions are recorded in DESIGN.md section 2.
 - [x] `parse/selectors.rs`: Tier 0 selectors: `*`, type, `#id`, `.class`, `[attr]`, `[attr=value]`, descendant, child, `:root`
 - [x] State selectors `:hover`, `:active`, `:focus` (adapter-provided state)
 - [x] `selectors/specificity.rs`: explicit `Specificity { a, b, c }` computed at parse time (spec 12.3)
-- [~] `selectors/matching.rs`: right-to-left matching is done. Candidate filtering by id, class, and type is not done.
+- [x] `selectors/matching.rs` and the candidate index: right-to-left matching, filtering of selectors by subject id, class, and type (`src/style/rule_index.rs`), and a per-pass sibling index for `:nth-child()` and `+` (`SiblingCache`). `~`, `:nth-of-type()`, and `:nth-child(... of S)` still walk the sibling list. Measured: an 8,000-sibling list with structural rules resolves in linear time (`tests/integration/perf.rs`).
 - [x] Selector complexity bound (spec 19.2)
 
 ### Cascade (spec 13)
@@ -84,17 +84,17 @@ All decisions are recorded in DESIGN.md section 2.
 
 ### Values (spec 14, basic)
 - [~] `values/number.rs`, `values/length.rs` (px, em, rem, %). `length.rs` is done. Numbers are `Value::Number` and the tokenizer. There is no `number.rs`.
-- [~] `values/color.rs`: named, `transparent`, `#rgb`, `#rrggbb`, `rgb()`, `rgba()`. Named colors are partial: the 16 basic colors and `orange`. The full table is pending.
+- [x] `values/color.rs`: all 148 named colors, `transparent`, hex (3, 4, 6, 8 digits), `rgb()`, `rgba()`, `hsl()`, `hsla()`, `hwb()`, `lab()`, `lch()`, `oklab()`, `oklch()`, `color()`, `color-mix()`, and relative color syntax (see section 6).
 - [x] `values/serialize.rs`: deterministic serialization (canonical form, not yet spec-exact CSSOM)
 
 ### Properties and style (spec 15, 16)
 - [x] `properties/registry.rs`: data-driven `PropertySpec` (spec 15.1)
 - [x] Initial M0 property set (spec 15.2, 37 properties)
-- [ ] `properties/aliases.rs`: explicit alias registry, no string stripping (spec 15.4). Not started (M1).
-- [~] `style/resolver.rs`: 14-step pipeline (spec 16.1). Steps 1–4 and 9–13 are done. Steps 5–8 (custom properties, `var()`) are M1.
+- [x] `properties/aliases.rs`: explicit alias registry, no string stripping (spec 15.4). One alias (`word-wrap` for `overflow-wrap`), and a test that vendor prefixes are not stripped (`tests/style/m3.rs`).
+- [x] `style/resolver.rs`: the cascade pipeline, with custom properties and `var()` (steps 5–8) in place (spec 16.1). See `style/custom.rs`.
 - [x] `style/inheritance.rs`: inheritance is in `style/resolver.rs` (DESIGN.md 5)
 - [x] `style/computed.rs`: `ComputedStyle` with typed accessors and property-ID storage (spec 8.3)
-- [~] `StyleMap` with `get`, `get_pseudo`, `custom_property` (spec 8.3). `get` is done. `get_pseudo` and `custom_property` are M1.
+- [x] `StyleMap` with `get`, `get_pseudo`, and `custom_property` (spec 8.3).
 - [x] Font-size computed first (spec 16.1)
 
 ### Tree contract (spec 9)
@@ -133,10 +133,10 @@ All decisions are recorded in DESIGN.md section 2.
 - [x] Custom property cycle detection and `max_var_depth` (spec 13.7, 19.2). A cycle makes its members invalid.
 - [x] `calc()`, `min()`, `max()`, `clamp()` with unit algebra and simplification (spec 14.4). Type-checked at parse time. Percentages stay symbolic except in `font-size`. Trig, `round()`, and the other M4 functions are not implemented.
 - [x] Media queries, `@media`, evaluation separate from matching (spec 16.3). Media type, `and`, `not`, lists, nesting, and the width, height, aspect-ratio, orientation, color-scheme, reduced-motion, hover, and pointer features.
-- [~] Remaining basic colors: `#rgba`, `#rrggbbaa`, `hsl()`, `hsla()`, `hwb()` done. `lab()`, `lch()`, `oklab()`, `oklch()`, and `color-mix()` are not implemented (spec 14.5).
+- [x] Remaining basic colors: `#rgba`, `#rrggbbaa`, `hsl()`, `hsla()`, `hwb()`, `lab()`, `lch()`, `oklab()`, `oklch()`, and `color-mix()` are done (spec 14.5). See section 6 for the open color items.
 - [~] Tier 0 and Tier 1 units (spec 14.3). Length units (px, em, rem, vw, vh, vmin, vmax, cm, mm, Q, in, pt, pc) and percent are done. Angle, time, and resolution units are accepted only for the hue of `hsl()`/`hwb()`.
-- [~] Shorthands: `margin`, `padding`, `border` (with sides, width, style, color), `background` (color only). `font`, `list-style`, and `text-decoration` are not implemented (spec 15.3).
-- [~] M1 property set (spec 15.2). Added: `overflow`, `position`, `top`, `right`, `bottom`, `left`, `z-index`, `opacity`, `content`, `vertical-align`, `white-space`, `direction`, `unicode-bidi`. Plus the M0 set and the shorthands above. `font`, `list-style`, `text-decoration`, and background images are not implemented.
+- [~] Shorthands: `margin`, `padding`, `border` (with sides, width, style, color), `background` (color only), `font` (style, weight, size, line height, family; no `font-variant`, `font-stretch`, or system fonts), `list-style` (type, position, and `none` for the image), and `text-decoration` (line, style, color; no thickness or skip-ink). Not done: `background` with images, `text-decoration-thickness`, and the `font-variant` and `font-stretch` longhands (spec 15.3).
+- [~] M1 property set (spec 15.2). Added: `overflow`, `position`, `top`, `right`, `bottom`, `left`, `z-index`, `opacity`, `content`, `vertical-align`, `white-space`, `direction`, `unicode-bidi`, and the long-tail rows listed in section 6. Plus the M0 set and the shorthands above. Background images are not implemented.
 - [~] Invalidation foundation (spec 17). Attribute, state, and inline changes restyle the subtree. Sibling-sensitive rules restyle the parent's subtree. Stylesheet and tree changes restyle everything. There is no dependency index yet (M3). Tests: `tests/integration/invalidation.rs`.
 - [x] Fixtures: selector, cascade, var, calc. Tests in `tests/selectors`, `tests/style/m1.rs`, `tests/cascade/media.rs`. Own fixture: `fixtures/mit/web-like.css`.
 - [x] Style a nontrivial AppFront document. `tests/integration/appfront.rs`: layers, custom-property theme, custom states, `:has()`, a media rule, and an incremental restyle.
@@ -187,7 +187,7 @@ All decisions are recorded in DESIGN.md section 2.
 ## 6. M4: long-tail web compatibility (spec 24)
 
 - [~] Long-tail selectors (spec 12.2 Tier 3). The state pseudo-classes are done: `:current`, `:past`, `:future`, `:defined`, `:local-link`, `:playing`, `:paused`, `:fullscreen`, `:autofill`. They match the state bits that the host sets, so `:defined` matches nothing until the host reports it. Not done: the functional forms (`:current(selector)`, `:past(selector)`, `:future(selector)`), `:dir()` edge cases, and the media-state pseudos beyond `:playing` and `:paused` (`tests/style/m3.rs`).
-- [ ] Long-tail properties and advanced values (spec 15.2). Not started beyond the M1 and M2 sets.
+- [~] Long-tail properties and advanced values (spec 15.2). Added as registry rows, with keyword or length grammars: `cursor`, `pointer-events`, `user-select`, `appearance`, `resize`, `outline-style`, `text-transform`, `text-indent`, `overflow-wrap`, `word-break`, `hyphens`, `text-rendering`, `text-overflow`, `float`, `clear`, `object-fit`, `image-rendering`, `mix-blend-mode`, `isolation`, `backface-visibility`, `scroll-behavior`, `overscroll-behavior`, `list-style-type`, `list-style-position`, `list-style-image` (`none` only), `text-decoration-line`, `text-decoration-style`, `text-decoration-color`, `letter-spacing`, and `word-spacing`. Not done: the properties that take several values in a grammar this engine does not have (`transition`, `flex`, `grid`, `border-radius`, `box-shadow`), and angle, time, and resolution values (`transform`, `animation-duration`).
 - [~] Advanced colors and media features (spec 14.5, 16.3). Full named color set (148), `lab()`, `lch()`, `oklab()`, `oklch()`, `color()` (srgb), and `color-mix()` in `srgb`, `srgb-linear`, `hsl`, `hwb`, `lab`, `lch`, `oklab`, and `oklch`, with premultiplied alpha and the `shorter` and `longer` hue methods. Relative color syntax for seven functions. Media features `resolution`, `update`, `dynamic-range`, and `prefers-contrast` are done. Not done: the other hue methods (`increasing`, `decreasing`), `xyz` spaces, and `color-mix()` in `display-p3` and other wide-gamut spaces.
 - [ ] Shadow DOM edge cases (spec 9.3). Not started. `ShadowInfo` is part of the tree contract but nothing reads it.
 - [ ] `::part`, `::slotted`, `::highlight()` and related pseudos. Not started; the pseudo-element identities exist, but they are not parsed.
@@ -204,7 +204,7 @@ All decisions are recorded in DESIGN.md section 2.
 - [x] `CLEAN_ROOM.md` provenance log updated for each contributor (spec 23.1). Entries added for each batch; each needs a human review.
 - [ ] Fuzz targets: tokenizer, stylesheet, selector, declaration, var, calc, color (spec 22.3). Not written. Seeded randomized tests stand in for them (`tests/integration/property.rs`); those are deterministic, not coverage-guided fuzzing.
 - [~] Property-based tests (spec 22.4). Seeded generators cover specificity additivity, `:is()` and `:where()` equivalence, incremental restyle against a full resolve, custom property cycle termination, declaration round trips, hostile text, every arity of the `margin` shorthand, and the `calc`, `min`, `max`, and `clamp` definitions. Other shorthands and the other math functions are not covered yet.
-- [~] Performance targets measured (spec 21.1). Tokenizer throughput and static-tree restyle measured (`tests/integration/perf.rs`, ignored by default; numbers in DESIGN.md section 8). Not measured: the 'avoid quadratic selector matching' target for wide trees with structural selectors.
+- [~] Performance targets measured (spec 21.1). Tokenizer throughput, static-tree restyle, and wide sibling lists are measured (`tests/integration/perf.rs`, ignored by default; numbers in DESIGN.md section 8). A wide list with `:nth-child()` and `+` now resolves in linear time: 8,000 siblings took 50 ms against 389 ms before the sibling index (4.2 times the time for 4 times the siblings, where quadratic would give about 16). Not measured: `~`, `:nth-of-type()`, and `:nth-child(of S)` on wide lists, which still walk the list.
 - [~] Bounds enforced (spec 20.3). Tokens, nesting, selector work and complexity, rule and declaration counts, input size, var depth, custom property cycles, the step budget, and stylesheet count (`max_stylesheets`, via `try_add_stylesheet`). Calc nesting is checked against `max_calc_depth` at declaration parse and after `var()` substitution; the value parser's own bound stays at 32, so a larger configured value does not raise it.
 - [~] No panics on hostile input (spec 19.1). Seeded hostile-text tests; not a fuzzer.
 - [x] Determinism: no hash-map iteration in cascade (spec 21.3).
