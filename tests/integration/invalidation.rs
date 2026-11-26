@@ -302,3 +302,21 @@ fn style_and_lang_changes_are_always_relevant() {
     let _ = r.restyle(&t, &env);
     assert!(r.last_restyle_count() > 0);
 }
+
+#[test]
+fn a_custom_property_change_reaches_descendants_that_read_it() {
+    let css = ".theme { --accent: #00ff00 } p { color: var(--accent) }";
+    let env = Environment::default();
+    let mut t = TestTree::new(NodeKind::Element);
+    let root = t.root();
+    t.nodes[0].name.local = "html".into();
+    let div = t.element(root, "div");
+    let p = t.element(div, "p");
+    let mut r = resolver_for(css);
+    let _ = r.resolve(&t, &env);
+    t.add_class(div, "theme");
+    r.invalidate(&t, StyleChange::AttributeChanged(div));
+    let map = r.restyle(&t, &env).clone();
+    assert_eq!(map.get(p).unwrap().color(), Color::rgb8(0, 255, 0));
+    assert_eq!(map, full(css, &t, &env));
+}

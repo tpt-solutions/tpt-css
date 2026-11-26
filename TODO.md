@@ -169,7 +169,7 @@ All decisions are recorded in DESIGN.md section 2.
 ## 5. M3: incremental style + CSSOM (spec 24)
 
 - [~] Selector dependency graph (spec 12.4, 17.2). Not built. The restyle uses two conservative flags per rule: `structural` (sibling-dependent) and `needs_ancestors` (`:has()`, `:scope`, `@scope`). Each drives a wider restyle.
-- [ ] Custom property dependency graph (spec 17.2). Not started; a custom property change restyles the element it is on.
+- [~] Custom property dependency graph (spec 17.2). Not built. A custom property change still reaches the elements that read it: the element's computed style holds its custom properties, so the equality cutoff restyles its subtree (`a_custom_property_change_reaches_descendants_that_read_it`, `tests/integration/invalidation.rs`). A graph from each custom property to its readers would restyle fewer elements.
 - [~] `StyleChange` enum and `RestyleHint` (spec 17.1, 17.2). `AttributeNamed` skips an attribute that no selector reads and style does not read directly. `AttributeChanged`, which has no name, stays conservative. There is no `RestyleHint` type.
 - [~] `invalidate` and `restyle` on `StyleResolver` (spec 8.2). Done, with an equality cutoff: an element whose computed style is unchanged stops the restyle, when every rule is subject-only. `resolve` and `restyle` return a reference into the cache and copy nothing.
 - [ ] Style sharing with safe sharing key (spec 17.3). Not started.
