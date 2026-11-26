@@ -67,6 +67,24 @@ impl StateBits {
     pub const MODAL: StateBits = StateBits(1 << 27);
     /// `:popover-open`
     pub const POPOVER_OPEN: StateBits = StateBits(1 << 28);
+    /// `:current`, the element or an ancestor is the current item (spec 9.2).
+    pub const CURRENT: StateBits = StateBits(1 << 29);
+    /// `:past`, the element is before the current item.
+    pub const PAST: StateBits = StateBits(1 << 30);
+    /// `:future`, the element is after the current item.
+    pub const FUTURE: StateBits = StateBits(1 << 31);
+    /// `:defined`, the host considers the element defined.
+    pub const DEFINED: StateBits = StateBits(1 << 32);
+    /// `:local-link`, a link to the same document or site.
+    pub const LOCAL_LINK: StateBits = StateBits(1 << 33);
+    /// `:playing`, a media element is playing.
+    pub const PLAYING: StateBits = StateBits(1 << 34);
+    /// `:paused`, a media element is paused.
+    pub const PAUSED: StateBits = StateBits(1 << 35);
+    /// `:fullscreen`, the element is in fullscreen.
+    pub const FULLSCREEN: StateBits = StateBits(1 << 36);
+    /// `:autofill`, the value was filled in by the user agent.
+    pub const AUTOFILL: StateBits = StateBits(1 << 37);
 
     /// No bits set.
     pub const fn empty() -> StateBits {

@@ -589,6 +589,15 @@ fn pseudo_class_name(pseudo: PseudoClass) -> &'static str {
         PseudoClass::Closed => "closed",
         PseudoClass::Modal => "modal",
         PseudoClass::PopoverOpen => "popover-open",
+        PseudoClass::Current => "current",
+        PseudoClass::Past => "past",
+        PseudoClass::Future => "future",
+        PseudoClass::Defined => "defined",
+        PseudoClass::LocalLink => "local-link",
+        PseudoClass::Playing => "playing",
+        PseudoClass::Paused => "paused",
+        PseudoClass::Fullscreen => "fullscreen",
+        PseudoClass::Autofill => "autofill",
     }
 }
 

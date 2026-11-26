@@ -155,7 +155,7 @@ All decisions are recorded in DESIGN.md section 2.
 - [x] Animation and transition cascade origins (spec 13.2). No animation driver exists (spec 3).
 - [x] Keyframe style resolution (`@keyframes`). `style::keyframes::value_at` interpolates numbers, lengths, percentages, and colors; other values change at the midpoint. The host supplies the progress; there is no timeline.
 - [x] `@font-face` parsing.
-- [~] Modern color functions: `color()`, relative color syntax, `light-dark()`. `light-dark()` and `color()` in `srgb` and `srgb-linear` are done. Relative color syntax (CSS Color 5) is done for `rgb`, `hsl`, `hwb`, `lab`, `lch`, `oklab`, and `oklch`. Relative `color()` is not (`tests/style/m3.rs`).
+- [~] Modern color functions: `color()`, relative color syntax, `light-dark()`. `light-dark()` and `color()` in `srgb` and `srgb-linear` are done, and so is relative `color(from ...)` for those two spaces. Relative color syntax (CSS Color 5) is done for `rgb`, `hsl`, `hwb`, `lab`, `lch`, `oklab`, and `oklch` (`tests/style/m3.rs`).
 - [x] Viewport and container units (spec 14.3). `cqw`, `cqh`, `cqi`, `cqb`, `cqmin`, `cqmax` resolve against the nearest size container.
 - [x] `:has()`. Relative selectors in all four combinator forms (`tests/selectors/m3.rs`).
 - [~] `:host`, `:host-context()`, `::slotted()`, `::part()`, `:state()` (spec 12.2 Tier 2). Not started; these are shadow-tree selectors and belong to M4.
@@ -186,9 +186,9 @@ All decisions are recorded in DESIGN.md section 2.
 
 ## 6. M4: long-tail web compatibility (spec 24)
 
-- [ ] Long-tail selectors (spec 12.2 Tier 3): `:defined`, `:local-link`, `:current`, `:past`, `:future`, media-state pseudos, and the rest. Not started; most need host state this engine does not model.
+- [~] Long-tail selectors (spec 12.2 Tier 3). The state pseudo-classes are done: `:current`, `:past`, `:future`, `:defined`, `:local-link`, `:playing`, `:paused`, `:fullscreen`, `:autofill`. They match the state bits that the host sets, so `:defined` matches nothing until the host reports it. Not done: the functional forms (`:current(selector)`, `:past(selector)`, `:future(selector)`), `:dir()` edge cases, and the media-state pseudos beyond `:playing` and `:paused` (`tests/style/m3.rs`).
 - [ ] Long-tail properties and advanced values (spec 15.2). Not started beyond the M1 and M2 sets.
-- [~] Advanced colors and media features (spec 14.5, 16.3). Full named color set (148), `lab()`, `lch()`, `oklab()`, `oklch()`, `color()` (srgb), `color-mix()` (srgb). Relative color syntax (CSS Color 5) for `rgb`, `hsl`, `hwb`, `lab`, `lch`, `oklab`, and `oklch`. Media features `resolution`, `update`, `dynamic-range`, and `prefers-contrast` are done. Not done: relative `color()`, and color interpolation in spaces other than sRGB.
+- [~] Advanced colors and media features (spec 14.5, 16.3). Full named color set (148), `lab()`, `lch()`, `oklab()`, `oklch()`, `color()` (srgb), and `color-mix()` in `srgb`, `srgb-linear`, `hsl`, `hwb`, `lab`, `lch`, `oklab`, and `oklch`, with premultiplied alpha and the `shorter` and `longer` hue methods. Relative color syntax for seven functions. Media features `resolution`, `update`, `dynamic-range`, and `prefers-contrast` are done. Not done: the other hue methods (`increasing`, `decreasing`), `xyz` spaces, and `color-mix()` in `display-p3` and other wide-gamut spaces.
 - [ ] Shadow DOM edge cases (spec 9.3). Not started. `ShadowInfo` is part of the tree contract but nothing reads it.
 - [ ] `::part`, `::slotted`, `::highlight()` and related pseudos. Not started; the pseudo-element identities exist, but they are not parsed.
 - [~] Serialization edge cases. Canonical serialization of values, selectors, and rules; the exact CSS spelling of every edge case is not checked.

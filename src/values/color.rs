@@ -235,7 +235,9 @@ pub fn parse_color(values: &[ComponentValue]) -> Option<Color> {
             TokenKind::Hash { value, .. } => parse_hex(value),
             _ => None,
         },
-        ComponentValue::Function(f) if starts_with_from(&f.value) => {
+        ComponentValue::Function(f)
+            if starts_with_from(&f.value) && Space::of(&f.name.to_ascii_lowercase()).is_some() =>
+        {
             parse_relative(&f.name.to_ascii_lowercase(), &f.value)
         }
         ComponentValue::Function(f) => match f.name.to_ascii_lowercase().as_str() {
@@ -571,6 +573,9 @@ fn parse_oklab(args: &[ComponentValue], polar: bool) -> Option<Color> {
 
 /// `color(srgb r g b [/ a])` and `color(srgb-linear ...)` (CSS Color 4 section 10).
 fn parse_color_function(args: &[ComponentValue]) -> Option<Color> {
+    if starts_with_from(args) {
+        return parse_relative_color_function(args);
+    }
     let args = trim_whitespace(args);
     let (space, rest) = match args.split_first() {
         Some((ComponentValue::Token(t), rest)) => match &t.kind {
@@ -594,51 +599,6 @@ fn parse_color_function(args: &[ComponentValue]) -> Option<Color> {
         space: ColorSpace::Srgb,
         components: [srgb[0] as f32, srgb[1] as f32, srgb[2] as f32],
         alpha: alpha_of(alpha.and_then(as_arg)),
-    })
-}
-
-/// `color-mix(in srgb, A [p%], B [q%])` (CSS Color 5). Only sRGB is supported.
-fn parse_color_mix(args: &[ComponentValue]) -> Option<Color> {
-    let parts = crate::parse::split_on(trim_whitespace(args), |v| v.is_token(&TokenKind::Comma));
-    let [space, first, second] = parts.as_slice() else {
-        return None;
-    };
-    let space: Vec<&ComponentValue> = trim_whitespace(space)
-        .iter()
-        .filter(|v| !v.is_whitespace())
-        .collect();
-    match space.as_slice() {
-        [ComponentValue::Token(a), ComponentValue::Token(b)]
-            if matches!(&a.kind, TokenKind::Ident(s) if s.eq_ignore_ascii_case("in"))
-                && matches!(&b.kind, TokenKind::Ident(s) if s.eq_ignore_ascii_case("srgb")) => {}
-        _ => return None,
-    }
-    let (ca, pa) = color_with_percent(first)?;
-    let (cb, pb) = color_with_percent(second)?;
-    let (wa, wb) = match (pa, pb) {
-        (None, None) => (0.5, 0.5),
-        (Some(p), None) => (p / 100.0, 1.0 - p / 100.0),
-        (None, Some(q)) => (1.0 - q / 100.0, q / 100.0),
-        (Some(p), Some(q)) => {
-            let total = p + q;
-            if total <= 0.0 {
-                return None;
-            }
-            (p / total, q / total)
-        }
-    };
-    if !(0.0..=1.0).contains(&wa) || !(0.0..=1.0).contains(&wb) {
-        return None;
-    }
-    let (wa, wb) = (wa as f32, wb as f32);
-    let mut components = [0.0f32; 3];
-    for (i, out) in components.iter_mut().enumerate() {
-        *out = ca.components[i] * wa + cb.components[i] * wb;
-    }
-    Some(Color {
-        space: ColorSpace::Srgb,
-        components,
-        alpha: ca.alpha * wa + cb.alpha * wb,
     })
 }
 
@@ -1173,4 +1133,201 @@ fn parse_relative(name: &str, args: &[ComponentValue]) -> Option<Color> {
         None => f64::from(origin.alpha),
     };
     Some(color_from_channels(space, values, alpha))
+}
+
+// ---- color-mix() and relative color() ----------------------------------------------
+
+/// The spaces that `color-mix()` and relative `color()` can work in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MixSpace {
+    Srgb,
+    SrgbLinear,
+    Model(Space),
+}
+
+impl MixSpace {
+    fn of(name: &str) -> Option<MixSpace> {
+        Some(match name {
+            "srgb" => MixSpace::Srgb,
+            "srgb-linear" => MixSpace::SrgbLinear,
+            "hsl" => MixSpace::Model(Space::Hsl),
+            "hwb" => MixSpace::Model(Space::Hwb),
+            "lab" => MixSpace::Model(Space::Lab),
+            "lch" => MixSpace::Model(Space::Lch),
+            "oklab" => MixSpace::Model(Space::Oklab),
+            "oklch" => MixSpace::Model(Space::Oklch),
+            _ => return None,
+        })
+    }
+
+    /// The index of the hue channel, for the polar spaces.
+    fn hue_index(self) -> Option<usize> {
+        match self {
+            MixSpace::Model(Space::Hsl | Space::Hwb) => Some(0),
+            MixSpace::Model(Space::Lch | Space::Oklch) => Some(2),
+            _ => None,
+        }
+    }
+
+    /// The channels of `color` in this space.
+    fn channels(self, color: Color) -> [f64; 3] {
+        match self {
+            MixSpace::Srgb => color.components.map(f64::from),
+            MixSpace::SrgbLinear => color.components.map(|c| linearize(f64::from(c))),
+            MixSpace::Model(space) => channels_of(color, space),
+        }
+    }
+
+    /// A color from channel values in this space.
+    fn color(self, ch: [f64; 3], alpha: f64) -> Color {
+        let alpha32 = alpha.clamp(0.0, 1.0) as f32;
+        match self {
+            MixSpace::Srgb => Color {
+                space: ColorSpace::Srgb,
+                components: ch.map(|c| c.clamp(0.0, 1.0) as f32),
+                alpha: alpha32,
+            },
+            MixSpace::SrgbLinear => color_from_linear(ch.map(|c| c.clamp(0.0, 1.0)), alpha32),
+            MixSpace::Model(space) => color_from_channels(space, ch, alpha),
+        }
+    }
+}
+
+/// How hues are interpolated (CSS Color 4 section 12.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HueMethod {
+    Shorter,
+    Longer,
+}
+
+/// Interpolates two colors in `space` with weights `wa` and `wb` (CSS Color 5).
+/// Alpha is premultiplied for the non-hue channels, so transparent colors do not
+/// tint the result. A hue moves along the arc that `method` selects.
+fn mix_in(space: MixSpace, method: HueMethod, a: Color, b: Color, (wa, wb): (f64, f64)) -> Color {
+    let (ca, cb) = (space.channels(a), space.channels(b));
+    let (aa, ab) = (f64::from(a.alpha), f64::from(b.alpha));
+    let alpha = aa * wa + ab * wb;
+    let hue = space.hue_index();
+    let mut out = [0.0; 3];
+    for i in 0..3 {
+        if Some(i) == hue {
+            let start = ca[i];
+            let delta = (cb[i] - start).rem_euclid(360.0);
+            // The shorter arc is within 180 degrees, in either direction.
+            let short = if delta > 180.0 { delta - 360.0 } else { delta };
+            let step = match method {
+                HueMethod::Shorter => short,
+                HueMethod::Longer if short > 0.0 => short - 360.0,
+                HueMethod::Longer if short < 0.0 => short + 360.0,
+                HueMethod::Longer => 0.0,
+            };
+            out[i] = (start + step * wb).rem_euclid(360.0);
+        } else if alpha > 0.0 {
+            out[i] = (ca[i] * aa * wa + cb[i] * ab * wb) / alpha;
+        }
+    }
+    space.color(out, alpha)
+}
+
+/// The two weights of `color-mix()` from the optional percentages (spec 14.5).
+fn mix_weights(pa: Option<f64>, pb: Option<f64>) -> Option<(f64, f64)> {
+    let (wa, wb) = match (pa, pb) {
+        (None, None) => (0.5, 0.5),
+        (Some(p), None) => (p / 100.0, 1.0 - p / 100.0),
+        (None, Some(q)) => (1.0 - q / 100.0, q / 100.0),
+        (Some(p), Some(q)) => {
+            let total = p + q;
+            if total <= 0.0 {
+                return None;
+            }
+            (p / total, q / total)
+        }
+    };
+    ((0.0..=1.0).contains(&wa) && (0.0..=1.0).contains(&wb)).then_some((wa, wb))
+}
+
+/// `color-mix(in <space> [<hue method> hue], A [p%], B [q%])` (CSS Color 5).
+fn parse_color_mix(args: &[ComponentValue]) -> Option<Color> {
+    let parts = crate::parse::split_on(trim_whitespace(args), |v| v.is_token(&TokenKind::Comma));
+    let [space, first, second] = parts.as_slice() else {
+        return None;
+    };
+    let space_items: Vec<&ComponentValue> = trim_whitespace(space)
+        .iter()
+        .filter(|v| !v.is_whitespace())
+        .collect();
+    let (space_name, method) = match space_items.as_slice() {
+        [in_kw, name] if is_ident(in_kw, "in") => (*name, HueMethod::Shorter),
+        [in_kw, name, method, hue] if is_ident(in_kw, "in") && is_ident(hue, "hue") => {
+            let method = match ident_lower(method)?.as_str() {
+                "shorter" => HueMethod::Shorter,
+                "longer" => HueMethod::Longer,
+                _ => return None,
+            };
+            (*name, method)
+        }
+        _ => return None,
+    };
+    let space = MixSpace::of(&ident_lower(space_name)?)?;
+    if space.hue_index().is_none() && method != HueMethod::Shorter {
+        return None;
+    }
+    let (ca, pa) = color_with_percent(first)?;
+    let (cb, pb) = color_with_percent(second)?;
+    let weights = mix_weights(pa, pb)?;
+    Some(mix_in(space, method, ca, cb, weights))
+}
+
+/// Whether `v` is the identifier `word`, ignoring case.
+fn is_ident(v: &ComponentValue, word: &str) -> bool {
+    matches!(v, ComponentValue::Token(t) if matches!(&t.kind, TokenKind::Ident(s) if s.eq_ignore_ascii_case(word)))
+}
+
+/// The lowercased identifier `v`, if it is one.
+fn ident_lower(v: &ComponentValue) -> Option<String> {
+    match v {
+        ComponentValue::Token(t) => match &t.kind {
+            TokenKind::Ident(s) => Some(s.to_ascii_lowercase()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// `color(from <color> srgb|srgb-linear r g b [/ alpha])` (CSS Color 5). The
+/// keywords `r`, `g`, and `b` stand for the origin's channels in that space.
+fn parse_relative_color_function(args: &[ComponentValue]) -> Option<Color> {
+    let items: Vec<&ComponentValue> = trim_whitespace(args)
+        .iter()
+        .filter(|v| !v.is_whitespace())
+        .collect();
+    // items[0] is `from`, items[1] the origin, items[2] the color space.
+    let origin = parse_color(std::slice::from_ref(*items.get(1)?))?;
+    let space = match ident_lower(items.get(2)?)?.as_str() {
+        "srgb" => MixSpace::Srgb,
+        "srgb-linear" => MixSpace::SrgbLinear,
+        _ => return None,
+    };
+    let rest = &items[3..];
+    let (channel_items, alpha_item) = match rest {
+        [a, b, c] => (vec![*a, *b, *c], None),
+        [a, b, c, slash, alpha] if slash.is_token(&TokenKind::Delim('/')) => {
+            (vec![*a, *b, *c], Some(*alpha))
+        }
+        _ => return None,
+    };
+    let bind = Bindings {
+        names: ["r", "g", "b"],
+        values: space.channels(origin),
+        alpha: f64::from(origin.alpha),
+    };
+    let mut values = [0.0; 3];
+    for (i, item) in channel_items.iter().enumerate() {
+        values[i] = eval_channel(item, &bind, 1.0)?;
+    }
+    let alpha = match alpha_item {
+        Some(item) => eval_channel(item, &bind, 1.0)?,
+        None => f64::from(origin.alpha),
+    };
+    Some(space.color(values, alpha))
 }

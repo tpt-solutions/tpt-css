@@ -275,7 +275,7 @@ fn color_mix_in_srgb_with_defaults_and_weights() {
 #[test]
 fn color_mix_in_an_unsupported_space_is_dropped() {
     let (t, _, child) = chain();
-    let map = style_with("child { color: color-mix(in lab, red, blue) }", &t);
+    let map = style_with("child { color: color-mix(in xyz, red, blue) }", &t);
     assert_eq!(style_of(&map, child).color(), Color::BLACK);
 }
 
@@ -692,4 +692,137 @@ fn malformed_relative_colors_are_dropped() {
     assert_eq!(color_of("p { color: rgb(from red x g b) }"), initial);
     // A missing origin.
     assert_eq!(color_of("p { color: rgb(from r g b) }"), initial);
+}
+
+// ---- color-mix() in more spaces and relative color() -------------------------------
+
+#[test]
+fn mixing_a_color_with_itself_gives_it_back_in_every_space() {
+    for space in [
+        "srgb",
+        "srgb-linear",
+        "hsl",
+        "hwb",
+        "lab",
+        "lch",
+        "oklab",
+        "oklch",
+    ] {
+        for origin in ["#3a7fc2", "#ff8000", "#808080", "#102030"] {
+            let css = format!("p {{ color: color-mix(in {space}, {origin} 50%, {origin}) }}");
+            let want = color_of(&format!("p {{ color: {origin} }}"));
+            assert!(
+                close_color(color_of(&css), want),
+                "color-mix in {space} of {origin} with itself"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_hundred_percent_weight_returns_that_color() {
+    for space in ["srgb-linear", "lab", "lch", "oklab", "oklch", "hsl", "hwb"] {
+        let css = format!("p {{ color: color-mix(in {space}, #3a7fc2 100%, #ff8000) }}");
+        assert!(
+            close_color(color_of(&css), Color::rgb8(0x3a, 0x7f, 0xc2)),
+            "{space}"
+        );
+    }
+}
+
+#[test]
+fn srgb_linear_mixes_in_linear_light() {
+    // Half of black and white in linear light is 0.5 linear, which encodes to
+    // about 0.735 in sRGB. Mixing in gamma-encoded sRGB would give 0.5.
+    let c = color_of("p { color: color-mix(in srgb-linear, black, white) }");
+    assert!((c.components[0] - 0.7354).abs() < 2e-3, "{c:?}");
+}
+
+#[test]
+fn hue_interpolation_follows_the_chosen_arc() {
+    // Hue 350 to hue 10. The shorter arc passes through 0 (red), and the
+    // longer arc passes through 180 (cyan).
+    let shorter =
+        color_of("p { color: color-mix(in hsl shorter hue, hsl(350 100% 50%), hsl(10 100% 50%)) }");
+    assert!(
+        shorter.components[0] > 0.99 && shorter.components[1] < 0.01,
+        "{shorter:?}"
+    );
+    let longer =
+        color_of("p { color: color-mix(in hsl longer hue, hsl(350 100% 50%), hsl(10 100% 50%)) }");
+    assert!(
+        longer.components[0] < 0.01 && longer.components[1] > 0.99,
+        "{longer:?}"
+    );
+}
+
+#[test]
+fn alpha_is_premultiplied_so_transparent_colors_do_not_tint() {
+    // `transparent` is black at alpha 0. Premultiplying keeps the red unchanged.
+    let c = color_of("p { color: color-mix(in srgb, transparent 50%, red) }");
+    assert!((c.alpha - 0.5).abs() < 1e-6);
+    assert!((c.components[0] - 1.0).abs() < 1e-3);
+    assert!(c.components[1].abs() < 1e-3);
+}
+
+#[test]
+fn relative_color_function_binds_the_origin_channels() {
+    let origin = Color::rgb8(0x3a, 0x7f, 0xc2);
+    assert!(close_color(
+        color_of("p { color: color(from #3a7fc2 srgb r g b) }"),
+        origin
+    ));
+    assert!(close_color(
+        color_of("p { color: color(from #3a7fc2 srgb-linear r g b) }"),
+        origin
+    ));
+    let half = color_of("p { color: color(from red srgb calc(r * 0.5) g b) }");
+    assert!((half.components[0] - 0.5).abs() < 1e-3);
+}
+
+#[test]
+fn malformed_mixes_are_dropped() {
+    let initial = color_of("p { }");
+    // A longer-hue method needs a polar space.
+    assert_eq!(
+        color_of("p { color: color-mix(in srgb longer hue, red, blue) }"),
+        initial
+    );
+    assert_eq!(
+        color_of("p { color: color-mix(in xyz, red, blue) }"),
+        initial
+    );
+}
+
+// ---- long-tail state pseudo-classes (spec 9.2, 12.2) -----------------------------
+
+#[test]
+fn host_reported_state_pseudo_classes_match_only_when_set() {
+    use tpt_css::tree::StateBits;
+    let cases = [
+        ("current", StateBits::CURRENT),
+        ("past", StateBits::PAST),
+        ("future", StateBits::FUTURE),
+        ("defined", StateBits::DEFINED),
+        ("local-link", StateBits::LOCAL_LINK),
+        ("playing", StateBits::PLAYING),
+        ("paused", StateBits::PAUSED),
+        ("fullscreen", StateBits::FULLSCREEN),
+        ("autofill", StateBits::AUTOFILL),
+    ];
+    let css = |name: &str| format!("child:{name} {{ color: red }}");
+    for (name, bit) in cases {
+        let (mut t, _, child) = chain();
+        assert_eq!(
+            style_of(&style_with(&css(name), &t), child).color(),
+            Color::BLACK,
+            ":{name} without its state"
+        );
+        t.set_state(child, bit);
+        assert_eq!(
+            style_of(&style_with(&css(name), &t), child).color(),
+            Color::rgb8(255, 0, 0),
+            ":{name} with its state"
+        );
+    }
 }

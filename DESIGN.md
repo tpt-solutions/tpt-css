@@ -366,11 +366,25 @@ engineering measurements, not claims about other machines (spec 21.1).
     and reset when sheets change. `StyleChange` is no longer `Copy`, because the
     name is owned.
 
+19. **`color-mix()` interpolates in eight spaces**: `srgb`, `srgb-linear`, `hsl`,
+    `hwb`, `lab`, `lch`, `oklab`, and `oklch`. Alpha is premultiplied for the
+    non-hue channels, so a transparent color does not tint the result. Hue
+    interpolation takes the `shorter` arc by default, or the `longer` arc when asked.
+    Other hue methods, and `xyz` and wide-gamut spaces, are not implemented. A
+    `longer` method in a space without a hue is rejected.
+20. **Relative `color(from ...)`** works for `srgb` and `srgb-linear`. The keywords
+    `r`, `g`, and `b` stand for the origin's channels in that space.
+21. **Long-tail state pseudo-classes** `:current`, `:past`, `:future`, `:defined`,
+    `:local-link`, `:playing`, `:paused`, `:fullscreen`, and `:autofill` match the
+    state bits the host sets. Nothing sets them by default, so `:defined` matches
+    nothing until the host reports the elements it considers defined. The
+    functional forms, `:current(selector)` and the others, are not implemented.
+
 ### Still open
 
-- Scope proximity is implemented (decision 12). The ordering for unscoped rules needs review against the spec text.
-- Relative color syntax for `color()`, and color interpolation in spaces other
-  than sRGB.
+- Scope proximity is implemented (decision 12). The order matches the Cascade 6 draft. `spec.txt` 13.3 still needs correcting.
+- Color spaces beyond the ones in decision 19 (`xyz`, `display-p3`, and the others),
+  and the hue methods other than `shorter` and `longer`.
 - `StyleChange::AttributeChanged` (no name) is still conservative. Use
   `AttributeNamed` to skip attributes that no selector reads.
 - Container units across nested containers: only the nearest size container is used.

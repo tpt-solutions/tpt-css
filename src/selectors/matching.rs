@@ -396,6 +396,15 @@ fn state_bit_matches(state: StateBits, pseudo: PseudoClass) -> bool {
         PseudoClass::Closed => StateBits::CLOSED,
         PseudoClass::Modal => StateBits::MODAL,
         PseudoClass::PopoverOpen => StateBits::POPOVER_OPEN,
+        PseudoClass::Current => StateBits::CURRENT,
+        PseudoClass::Past => StateBits::PAST,
+        PseudoClass::Future => StateBits::FUTURE,
+        PseudoClass::Defined => StateBits::DEFINED,
+        PseudoClass::LocalLink => StateBits::LOCAL_LINK,
+        PseudoClass::Playing => StateBits::PLAYING,
+        PseudoClass::Paused => StateBits::PAUSED,
+        PseudoClass::Fullscreen => StateBits::FULLSCREEN,
+        PseudoClass::Autofill => StateBits::AUTOFILL,
         // Structural pseudo-classes are handled by the caller.
         PseudoClass::Root | PseudoClass::Empty => return false,
     };

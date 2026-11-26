@@ -209,6 +209,24 @@ pub enum PseudoClass {
     Modal,
     /// `:popover-open`
     PopoverOpen,
+    /// `:current`
+    Current,
+    /// `:past`
+    Past,
+    /// `:future`
+    Future,
+    /// `:defined`
+    Defined,
+    /// `:local-link`
+    LocalLink,
+    /// `:playing`
+    Playing,
+    /// `:paused`
+    Paused,
+    /// `:fullscreen`
+    Fullscreen,
+    /// `:autofill`
+    Autofill,
 }
 
 /// A relative selector inside `:has()`: a complex selector whose subject is
