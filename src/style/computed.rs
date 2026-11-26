@@ -83,7 +83,7 @@ pub(crate) struct ComputeContext {
     pub parent_weight: f64,
 }
 
-/// Computes one value (spec 16.1 step 10, CSS Values 4 section 2 for the
+/// Computes one value (spec 16.1 step 10, CSS Values 4 for the
 /// absolute-length rules).
 ///
 /// - `em` and `rem` become px. `font-size` percentages and `em` use the parent
@@ -147,8 +147,8 @@ fn finite(x: f64) -> f64 {
     }
 }
 
-/// `bolder` relative to the parent weight (CSS Fonts 4 section 2.2).
-/// The thresholds follow the spec table; see SPEC_TRACE.md for the verification status.
+/// `bolder` relative to the parent weight (CSS Fonts 4, relative font weights).
+/// Thresholds were written from CSS Fonts 4 and are not yet verified against the text (see SPEC_TRACE.md).
 fn bolder(parent: f64) -> f64 {
     if parent < 350.0 {
         400.0
@@ -159,7 +159,7 @@ fn bolder(parent: f64) -> f64 {
     }
 }
 
-/// `lighter` relative to the parent weight (CSS Fonts 4 section 2.2).
+/// `lighter` relative to the parent weight (CSS Fonts 4, relative font weights).
 fn lighter(parent: f64) -> f64 {
     if parent < 550.0 {
         100.0

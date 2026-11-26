@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Copyright (c) 2026 TPT Solutions
 
-//! Cascade origins and importance (spec 13.2; CSS Cascade 5 section 6.1).
+//! Cascade origins and importance (spec 13.2; CSS Cascade 5, origins).
 
 /// The origin of a declaration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

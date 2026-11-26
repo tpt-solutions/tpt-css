@@ -61,7 +61,7 @@ impl Color {
     }
 }
 
-/// Basic named colors (CSS Color 4 section 6.1, the 16 basic keywords) plus
+/// Basic named colors (CSS Color 4, basic named colors) plus
 /// `orange`. Values are the standard sRGB hex values.
 const NAMED: &[(&str, [u8; 3])] = &[
     ("black", [0, 0, 0]),

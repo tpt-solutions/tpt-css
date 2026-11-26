@@ -2,7 +2,7 @@
 // Copyright (c) 2026 TPT Solutions
 
 //! CSS tokenizer (spec 10.1), following the consume-token algorithm of
-//! CSS Syntax Level 3 section 4.
+//! CSS Syntax Level 3, tokenization.
 //!
 //! Notes on this implementation:
 //! - Spans refer to the original input bytes. Newline normalization
@@ -47,7 +47,7 @@ pub fn tokenize(source: SourceId, input: &str, limits: &ParseLimits) -> Tokenize
     let mut limit_exceeded = false;
 
     loop {
-        // Comments produce no tokens (CSS Syntax 3 section 4.3.2).
+        // Comments produce no tokens (CSS Syntax 3, comments).
         while t.rest().starts_with("/*") {
             t.skip_comment();
         }
@@ -188,7 +188,7 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    /// Consume-a-token (CSS Syntax 3 section 4.3.1). Precondition: not at EOF.
+    /// Consume-a-token (CSS Syntax 3, consume a token). Precondition: not at EOF.
     fn consume_token(&mut self) -> TokenKind {
         let la = self.lookahead();
         let c = match la[0] {

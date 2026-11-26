@@ -89,7 +89,7 @@ impl Initial {
 pub struct PropertySpec {
     /// Property name, lowercase ASCII.
     pub name: &'static str,
-    /// Whether the property inherits by default (CSS Cascade 5 section 7.2).
+    /// Whether the property inherits by default (CSS Cascade, inheritance).
     pub inherited: bool,
     /// Initial value.
     pub initial: Initial,

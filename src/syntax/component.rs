@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Copyright (c) 2026 TPT Solutions
 
-//! Component values (spec 10.2, CSS Syntax 3 section 5.3).
+//! Component values (spec 10.2, CSS Syntax 3, component values).
 //!
 //! A component value is a preserved token, a function, or a simple block
 //! (`()`, `[]`, `{}`). Values are not interpreted as properties here; that

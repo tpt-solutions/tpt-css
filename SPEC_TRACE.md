@@ -12,11 +12,11 @@ with the gap named in the last column. **todo** = not started.
 
 | Spec | Algorithm | Module | Tests | External | Status | Known gaps |
 | --- | --- | --- | --- | --- | --- | --- |
-| 10.1, CSS Syntax 3 §4.3.1 | consume a token | `syntax/tokenizer.rs` `consume_token` | `tests/syntax` | not run | done | Comment preservation is not implemented. |
-| 10.1, CSS Syntax 3 §4.3.7 | consume an escaped code point | `syntax/tokenizer.rs` `consume_escape` | `tests/syntax` (`hex_escapes_and_replacement_characters`) | not run | done | |
-| 10.1, CSS Syntax 3 §4.3.4–4.3.6 | consume a url token, bad url | `syntax/tokenizer.rs` `consume_url` | `tests/syntax` (`unquoted_url_and_bad_url`) | not run | done | |
-| 10.1, CSS Syntax 3 §4.3.3 | consume a number | `syntax/tokenizer.rs` `consume_number` | `tests/syntax` | not run | done | Values are `f64` (spec 25.1). |
-| 10.2, CSS Syntax 3 §5.3 | consume a component value | `syntax/component.rs` `build_component_values` | `tests/syntax` | not run | done | The build is iterative. Nesting beyond the limit fails the whole sheet. |
+| 10.1, CSS Syntax 3 (consume a token) | consume a token | `syntax/tokenizer.rs` `consume_token` | `tests/syntax` | not run | done | Comment preservation is not implemented. |
+| 10.1, CSS Syntax 3 (escapes) | consume an escaped code point | `syntax/tokenizer.rs` `consume_escape` | `tests/syntax` (`hex_escapes_and_replacement_characters`) | not run | done | |
+| 10.1, CSS Syntax 3 (url tokens) | consume a url token, bad url | `syntax/tokenizer.rs` `consume_url` | `tests/syntax` (`unquoted_url_and_bad_url`) | not run | done | |
+| 10.1, CSS Syntax 3 (consume a numeric token) | consume a number | `syntax/tokenizer.rs` `consume_number` | `tests/syntax` | not run | done | Values are `f64` (spec 25.1). |
+| 10.2, CSS Syntax 3 (component values) | consume a component value | `syntax/component.rs` `build_component_values` | `tests/syntax` | not run | done | The build is iterative. Nesting beyond the limit fails the whole sheet. |
 | 10.3 | source spans | `syntax/span.rs` | `tests/syntax` (`crlf_is_one_whitespace_token...`) | n/a | done | Spans are byte offsets, not line and column. |
 
 ## Parse (spec 8.1, 11)
@@ -24,8 +24,8 @@ with the gap named in the last column. **todo** = not started.
 | Spec | Algorithm | Module | Tests | External | Status | Known gaps |
 | --- | --- | --- | --- | --- | --- | --- |
 | 8.1 | parse a stylesheet | `parse/stylesheet.rs` | `tests/parse` | not run | done | Quirks mode is not modeled. |
-| CSS Syntax 3 §5.4.1, §5.4.3 | consume a list of rules, qualified rule | `parse/rules.rs` | `tests/parse` | not run | partial | Nested rules are M2. |
-| CSS Syntax 3 §5.4.4 | consume a declaration | `parse/declarations.rs` | `tests/parse` (`an_invalid_declaration_does_not_abort...`) | not run | done | Custom properties are kept but not used (M1). |
+| CSS Syntax 3 (rule lists) | consume a list of rules, qualified rule | `parse/rules.rs` | `tests/parse` | not run | partial | Nested rules are M2. |
+| CSS Syntax 3 (declarations) | consume a declaration | `parse/declarations.rs` | `tests/parse` (`an_invalid_declaration_does_not_abort...`) | not run | done | Custom properties are kept but not used (M1). |
 | 11.2 | at-rule skeleton | `parse/rules.rs` `consume_at_rule` | `tests/parse` (`unknown_at_rules_are_preserved...`) | not run | partial | Only unknown at-rules are preserved. |
 | 19.3 | diagnostics | `parse/diagnostics.rs` | `tests/parse` | n/a | done | |
 | 19.2 | limits | `limits.rs` | `tests/parse` (`selector_complexity...`, `declaration_limit...`, `deep_nesting...`), `tests/syntax` | n/a | partial | `max_var_depth`, `max_calc_depth`, and a stylesheet count limit are not enforced yet. |
@@ -45,7 +45,7 @@ with the gap named in the last column. **todo** = not started.
 
 | Spec | Algorithm | Module | Tests | External | Status | Known gaps |
 | --- | --- | --- | --- | --- | --- | --- |
-| 13.2, Cascade 5 §6.1 | origin and importance order | `cascade/origin.rs` `precedence` | `tests/cascade` (`origin_and_importance_follow_spec_13_2`, `ua_important_beats_author_important`) | not run | done | Animation and transition ranks have no importance. |
+| 13.2, Cascade 5 (origins) | origin and importance order | `cascade/origin.rs` `precedence` | `tests/cascade` (`origin_and_importance_follow_spec_13_2`, `ua_important_beats_author_important`) | not run | done | Animation and transition ranks have no importance. |
 | 13.3 | cascade key | `cascade/mod.rs` `CascadeKey` | `tests/cascade` | not run | partial | Layer and scope proximity fields are M2. |
 | 13.3 | declaration order | `cascade/order.rs` | `tests/cascade` (`later_declaration_wins...`) | not run | done | |
 | 13.5 | inline style | `style/resolver.rs` `cascade` | `tests/cascade` (`inline_*`) | not run | done | |

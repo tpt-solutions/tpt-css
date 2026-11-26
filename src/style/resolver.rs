@@ -205,7 +205,7 @@ impl StyleResolver {
             values[idx] = computed;
         }
 
-        // CSS Backgrounds 3 section 4.3: border-width computes to 0 when the
+        // CSS Backgrounds 3, border-width computed value: border-width computes to 0 when the
         // style is none or hidden.
         for side in 0..4 {
             let style_idx = ids::BORDER_TOP_STYLE.index() + side;

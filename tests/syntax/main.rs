@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Copyright (c) 2026 TPT Solutions
 
-//! Syntax layer tests: tokenizer (CSS Syntax 3 section 4) and component
-//! values (section 5.3).
+//! Syntax layer tests: tokenizer (CSS Syntax 3, tokenization) and component
+//! values (CSS Syntax 3, component values).
 
 use tpt_css::syntax::component::{build_component_values, ComponentValue};
 use tpt_css::syntax::{tokenize, NumericType, SourceId, TokenKind};

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Copyright (c) 2026 TPT Solutions
 
-//! Declaration parsing (spec 11.4; CSS Syntax 3 section 5.4.2 and 5.4.4).
+//! Declaration parsing (spec 11.4; CSS Syntax 3, declarations).
 //!
 //! Invalid declarations are dropped with a diagnostic and never abort the
 //! surrounding block or stylesheet.

@@ -78,10 +78,10 @@ Each deviation is deliberate and is listed here so it can be reviewed.
     value to the user agent. The core needs a concrete generic.
 14. **Initial value of `color` is opaque black.** Same reason as above.
 15. **`border-*-width` computes to 0 when the matching style is `none` or
-    `hidden`** (CSS Backgrounds 3 section 4.3). This is the only cross-property
+    `hidden`** (CSS Backgrounds 3, border-width computed value). This is the only cross-property
     dependency in M0 computation.
 16. **`bolder` and `lighter` thresholds.** These follow the table in CSS Fonts 4
-    section 2.2 as recorded in `style/computed.rs`. The table is not yet checked
+    (relative weights) as recorded in `style/computed.rs`. The table is not yet checked
     against the spec text, and [SPEC_TRACE.md](SPEC_TRACE.md) records that.
 
 ## 4. Known M0 gaps

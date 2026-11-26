@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Copyright (c) 2026 TPT Solutions
 
-//! Rule-list parsing (spec 11.2, 11.3; CSS Syntax 3 section 5.4.1 and 5.4.3).
+//! Rule-list parsing (spec 11.2, 11.3; CSS Syntax 3, rule lists).
 
 use super::declarations::parse_block_contents;
 use super::diagnostics::{Diagnostic, DiagnosticCode};

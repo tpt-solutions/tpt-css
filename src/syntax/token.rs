@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Copyright (c) 2026 TPT Solutions
 
-//! Token kinds (spec 10.1, CSS Syntax 3 section 4).
+//! Token kinds (spec 10.1, CSS Syntax 3, tokenization).
 
 use super::span::Span;
 
@@ -14,7 +14,7 @@ pub struct Token {
     pub span: Span,
 }
 
-/// The numeric type flag of a number token (CSS Syntax 3 section 4.3.3).
+/// The numeric type flag of a number token (CSS Syntax 3, consume a numeric token).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NumericType {
     /// Written without a fraction or exponent.

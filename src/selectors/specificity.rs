@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Copyright (c) 2026 TPT Solutions
 
-//! Specificity (spec 12.3; Selectors 4 section 17).
+//! Specificity (spec 12.3; Selectors 4, specificity).
 //!
 //! Computed at parse time. Ordering is lexicographic on `(a, b, c)`, which
 //! the derived `Ord` implements because fields are declared in that order.
