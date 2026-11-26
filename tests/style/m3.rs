@@ -275,7 +275,7 @@ fn color_mix_in_srgb_with_defaults_and_weights() {
 #[test]
 fn color_mix_in_an_unsupported_space_is_dropped() {
     let (t, _, child) = chain();
-    let map = style_with("child { color: color-mix(in xyz, red, blue) }", &t);
+    let map = style_with("child { color: color-mix(in display-p3, red, blue) }", &t);
     assert_eq!(style_of(&map, child).color(), Color::BLACK);
 }
 
@@ -701,6 +701,8 @@ fn mixing_a_color_with_itself_gives_it_back_in_every_space() {
     for space in [
         "srgb",
         "srgb-linear",
+        "xyz",
+        "xyz-d50",
         "hsl",
         "hwb",
         "lab",
@@ -789,7 +791,7 @@ fn malformed_mixes_are_dropped() {
         initial
     );
     assert_eq!(
-        color_of("p { color: color-mix(in xyz, red, blue) }"),
+        color_of("p { color: color-mix(in display-p3, red, blue) }"),
         initial
     );
 }

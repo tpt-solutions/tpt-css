@@ -585,6 +585,11 @@ fn parse_color_function(args: &[ComponentValue]) -> Option<Color> {
         _ => return None,
     };
     let (c, alpha) = components_and_alpha(rest)?;
+    if is_xyz_space(&space) {
+        let xyz = [scaled(c[0], 1.0)?, scaled(c[1], 1.0)?, scaled(c[2], 1.0)?];
+        let linear = xyz_to_linear(xyz, space == "xyz-d50");
+        return Some(color_from_linear(linear, alpha_of(alpha.and_then(as_arg))));
+    }
     let channels = [
         scaled(c[0], 1.0)?.clamp(0.0, 1.0),
         scaled(c[1], 1.0)?.clamp(0.0, 1.0),
@@ -1142,6 +1147,8 @@ fn parse_relative(name: &str, args: &[ComponentValue]) -> Option<Color> {
 enum MixSpace {
     Srgb,
     SrgbLinear,
+    Xyz65,
+    Xyz50,
     Model(Space),
 }
 
@@ -1150,6 +1157,8 @@ impl MixSpace {
         Some(match name {
             "srgb" => MixSpace::Srgb,
             "srgb-linear" => MixSpace::SrgbLinear,
+            "xyz" | "xyz-d65" => MixSpace::Xyz65,
+            "xyz-d50" => MixSpace::Xyz50,
             "hsl" => MixSpace::Model(Space::Hsl),
             "hwb" => MixSpace::Model(Space::Hwb),
             "lab" => MixSpace::Model(Space::Lab),
@@ -1174,6 +1183,12 @@ impl MixSpace {
         match self {
             MixSpace::Srgb => color.components.map(f64::from),
             MixSpace::SrgbLinear => color.components.map(|c| linearize(f64::from(c))),
+            MixSpace::Xyz65 => {
+                linear_to_xyz(color.components.map(|c| linearize(f64::from(c))), false)
+            }
+            MixSpace::Xyz50 => {
+                linear_to_xyz(color.components.map(|c| linearize(f64::from(c))), true)
+            }
             MixSpace::Model(space) => channels_of(color, space),
         }
     }
@@ -1188,6 +1203,8 @@ impl MixSpace {
                 alpha: alpha32,
             },
             MixSpace::SrgbLinear => color_from_linear(ch.map(|c| c.clamp(0.0, 1.0)), alpha32),
+            MixSpace::Xyz65 => color_from_linear(xyz_to_linear(ch, false), alpha32),
+            MixSpace::Xyz50 => color_from_linear(xyz_to_linear(ch, true), alpha32),
             MixSpace::Model(space) => color_from_channels(space, ch, alpha),
         }
     }
@@ -1330,4 +1347,48 @@ fn parse_relative_color_function(args: &[ComponentValue]) -> Option<Color> {
         None => f64::from(origin.alpha),
     };
     Some(space.color(values, alpha))
+}
+
+// ---- XYZ color spaces (CSS Color 4 section 10.3) -----------------------------------
+
+/// Linear sRGB to XYZ with the D65 white point (the standard sRGB matrix).
+const SRGB_TO_XYZ_D65: [[f64; 3]; 3] = [
+    [0.412_390_799_3, 0.357_584_339_4, 0.180_480_788_4],
+    [0.212_639_005_9, 0.715_168_678_8, 0.072_192_315_4],
+    [0.019_330_818_7, 0.119_194_779_8, 0.950_532_152_2],
+];
+
+/// XYZ with the D50 white point to linear sRGB. This is the matrix that
+/// [`lab_to_srgb`] uses, so the Lab and XYZ spaces agree.
+const XYZ_D50_TO_LINEAR_SRGB: [[f64; 3]; 3] = [
+    [3.1338561, -1.6168667, -0.4906146],
+    [-0.9787684, 1.9161415, 0.0334540],
+    [0.0719453, -0.2289914, 1.4052427],
+];
+
+fn mat_vec(m: [[f64; 3]; 3], v: [f64; 3]) -> [f64; 3] {
+    m.map(|row| row[0] * v[0] + row[1] * v[1] + row[2] * v[2])
+}
+
+/// Whether `space` names one of the XYZ spaces (`xyz`, `xyz-d65`, or `xyz-d50`).
+fn is_xyz_space(space: &str) -> bool {
+    matches!(space, "xyz" | "xyz-d65" | "xyz-d50")
+}
+
+/// Linear sRGB to XYZ, with the D65 or D50 white point.
+fn linear_to_xyz(linear: [f64; 3], d50: bool) -> [f64; 3] {
+    if d50 {
+        mat_vec(invert3(XYZ_D50_TO_LINEAR_SRGB), linear)
+    } else {
+        mat_vec(SRGB_TO_XYZ_D65, linear)
+    }
+}
+
+/// XYZ with the D65 or D50 white point to linear sRGB.
+fn xyz_to_linear(xyz: [f64; 3], d50: bool) -> [f64; 3] {
+    if d50 {
+        mat_vec(XYZ_D50_TO_LINEAR_SRGB, xyz)
+    } else {
+        mat_vec(invert3(SRGB_TO_XYZ_D65), xyz)
+    }
 }

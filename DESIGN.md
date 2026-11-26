@@ -372,7 +372,8 @@ engineering measurements, not claims about other machines (spec 21.1).
     `hwb`, `lab`, `lch`, `oklab`, and `oklch`. Alpha is premultiplied for the
     non-hue channels, so a transparent color does not tint the result. Hue
     interpolation takes the `shorter` arc by default, or the `longer` arc when asked.
-    Other hue methods, and `xyz` and wide-gamut spaces, are not implemented. A
+    Other hue methods, and wide-gamut spaces such as `display-p3`, are not implemented. XYZ
+    (`xyz`, `xyz-d50`, `xyz-d65`) is in `color-mix()` and `color()` (decision 31). A
     `longer` method in a space without a hue is rejected.
 20. **Relative `color(from ...)`** works for `srgb` and `srgb-linear`. The keywords
     `r`, `g`, and `b` stand for the origin's channels in that space.
@@ -447,10 +448,17 @@ engineering measurements, not claims about other machines (spec 21.1).
     corner order (top-left, top-right, bottom-right, bottom-left), with the same
     expansion as the box shorthands. The elliptical `/` form is not supported.
 
+31. **XYZ color spaces.** `color(xyz xyz-d65 xyz-d50 ...)` and `color-mix()` in
+    `xyz`, `xyz-d65`, and `xyz-d50` convert through linear sRGB. D65 uses the
+    standard sRGB matrix and its inverse. D50 uses the matrix that Lab already
+    uses, so the XYZ and Lab spaces agree. Out-of-gamut results are clamped on
+    output, as they are for Lab. The relative form `color(from ... xyz ...)` is not
+    implemented.
+
 ### Still open
 
 - Scope proximity is implemented (decision 12). The order matches the Cascade 6 draft. `spec.txt` 13.3 was corrected in a39110c.
-- Color spaces beyond the ones in decision 19 (`xyz`, `display-p3`, and the others),
+- Color spaces beyond the ones in decision 19 and XYZ (`display-p3` and the others),
   and the hue methods other than `shorter` and `longer`.
 - `StyleChange::AttributeChanged` (no name) is still conservative. Use
   `AttributeNamed` to skip attributes that no selector reads.
