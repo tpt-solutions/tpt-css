@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[package]
+name = "tpt-css"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Clean-room CSS engine: tokens to computed styles over an abstract tree"
+license = "MIT OR Apache-2.0"
+authors = ["TPT Solutions"]
+publish = false
+
+[dependencies]
+# Zero third-party dependencies in the core (spec 23.2).
+
+[features]
+default = ["appfront"]
+
+# Core profile targets (spec 7)
+appfront = []
+web = ["cssom"]
+
+# Optional API surfaces (spec 7). `cssom` is a placeholder until M3.
+cssom = []
+
+[lints.rust]
+unsafe_code = "forbid"

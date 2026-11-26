@@ -1,0 +1,6 @@
+/* Own MIT fixture, written from spec behavior (spec 22.2). Uses only M0 features. */
+app { color: #222; font-size: 18px }
+.card { margin-left: 2em; padding: 0 }
+panel:hover { border-top-width: 2px; border-top-style: solid }
+panel > label { font-weight: bold; line-height: 1.5 }
+button.primary { color: rgb(0 0 255); font-size: 1rem }

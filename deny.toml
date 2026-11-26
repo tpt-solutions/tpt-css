@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# cargo-deny configuration (spec 23.2, 23.3).
+#
+# Policy:
+# - The core has no third-party dependencies.
+# - Any dependency must offer MIT. Apache-only, MPL, GPL, and LGPL are denied.
+#   A license expression such as "MIT OR Apache-2.0" passes because its MIT
+#   option is allowed; "Apache-2.0" alone does not.
+# - Run with: cargo deny check licenses bans
+
+[graph]
+all-features = true
+
+[licenses]
+# Only MIT is allowed on its own. Dual licenses that include MIT pass through it.
+allow = ["MIT"]
+confidence-threshold = 0.93
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+deny = [
+    # Known CSS engines and parsers. The engine is clean-room (spec 2.1, 23.1).
+    { name = "cssparser" },
+    { name = "selectors" },
+    { name = "lightningcss" },
+    { name = "stylo" },
+    { name = "servo-css-parser" },
+]
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

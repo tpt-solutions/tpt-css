@@ -1,0 +1,9 @@
+   0..6    Ident("Abc")
+   6..7    Whitespace
+   7..13   String("q\"x")
+  13..14   Whitespace
+  14..22   BadUrl
+  22..23   Whitespace
+  23..34   Url("ok.png")
+  34..35   Whitespace
+  35..35   Eof

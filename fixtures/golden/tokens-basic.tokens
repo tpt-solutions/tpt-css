@@ -1,0 +1,32 @@
+   0..1    Ident("a")
+   1..2    Whitespace
+   2..3    LeftCurly
+   3..4    Whitespace
+   4..9    Ident("color")
+   9..10   Colon
+  10..11   Whitespace
+  11..15   Hash { value: "fff", is_id: true }
+  15..16   Semicolon
+  16..17   Whitespace
+  17..23   Ident("margin")
+  23..24   Colon
+  24..25   Whitespace
+  25..31   Dimension { value: -1.5, ty: Number, unit: "em" }
+  31..32   Whitespace
+  32..36   Ident("auto")
+  36..37   Whitespace
+  37..38   RightCurly
+  38..39   Whitespace
+  39..45   AtKeyword("media")
+  45..46   Whitespace
+  46..47   LeftParen
+  47..56   Ident("min-width")
+  56..57   Colon
+  57..58   Whitespace
+  58..62   Dimension { value: 10.0, ty: Integer, unit: "px" }
+  62..63   RightParen
+  63..64   Whitespace
+  64..65   LeftCurly
+  65..66   RightCurly
+  66..67   Whitespace
+  67..67   Eof

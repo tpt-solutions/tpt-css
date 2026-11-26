@@ -1,0 +1,8 @@
+tpt-css
+Copyright (c) 2026 TPT Solutions
+
+This project is dual licensed under MIT OR Apache-2.0 at the user's option.
+See LICENSE-MIT and LICENSE-APACHE.
+
+This product includes no third-party code. The core crate has no
+third-party dependencies (see spec.txt section 23.2).

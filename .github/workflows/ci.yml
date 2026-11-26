@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# CI gates from spec.txt section 23.3.
+#
+# Not yet in CI: fuzz smoke (fuzz targets are not written) and the spec trace
+# check (tools/spec_trace does not exist yet). Add them when they exist.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy --all-targets -- -D warnings
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        features: ["", "--no-default-features", "--features web"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test ${{ matrix.features }}
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.75
+      - run: cargo test
+
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses bans
+
+  unsafe-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No unsafe code outside the forbid attribute
+        run: |
+          if grep -rnE '\bunsafe\b' src --include='*.rs' | grep -v 'forbid(unsafe_code)'; then
+            echo "unsafe found"; exit 1
+          fi

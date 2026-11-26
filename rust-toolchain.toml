@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Toolchain pin for development and CI. The MSRV is declared in Cargo.toml
+# as `rust-version`; CI must also build with that exact version.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]

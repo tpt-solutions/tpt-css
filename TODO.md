@@ -3,121 +3,124 @@
 Project: tpt-css, a clean-room CSS engine in Rust.
 License: dual `MIT OR Apache-2.0`. Copyright TPT Solutions.
 Source of truth: [spec.txt](spec.txt). Section numbers below refer to it.
+Decisions and deviations: [DESIGN.md](DESIGN.md). Spec traceability: [SPEC_TRACE.md](SPEC_TRACE.md).
 
-Legend: `[ ]` not started, `[~]` in progress, `[x]` done.
+Legend: `[ ]` not started, `[~]` in progress or partly done (the note says what is missing), `[x]` done.
 
 ---
 
 ## 0. Repo setup
 
 - [x] `git init` in project folder
-- [ ] Add `LICENSE-MIT` (copyright TPT Solutions) (spec 23.2)
-- [ ] Add `LICENSE-APACHE` (full Apache-2.0 text) (spec 23.2)
-- [ ] Add `NOTICE` with TPT Solutions copyright (spec 23.2)
-- [ ] Add `README.md` (spec 23.2)
-- [ ] Add `CLEAN_ROOM.md` with provenance rules and contributor log (spec 23.1)
-- [ ] Add `DESIGN.md` (spec 6)
-- [ ] Add `SPEC_TRACE.md` skeleton, section -> module -> tests (spec 22.5)
-- [ ] Add `deny.toml` with license and ban rules (spec 23.3). Deny Apache-only licenses for dependencies, allow only dependencies that offer MIT (`MIT` or `MIT OR Apache-2.0`)
-- [ ] Add `.gitignore` for Rust (`target/`)
-- [ ] Decide Rust toolchain version and add `rust-toolchain.toml` (MSRV)
-- [ ] Create `Cargo.toml` with dual license field `MIT OR Apache-2.0`, zero dependencies (spec 6, 7, 23.2)
-- [ ] Create `src/lib.rs` with `#![forbid(unsafe_code)]` (spec 23.3)
-- [ ] Add every first-party file header `// SPDX-License-Identifier: MIT OR Apache-2.0` (spec 23.2)
-- [ ] Decide first commit scope and make it (spec 26)
-- [ ] Add CI workflow: fmt, clippy, test, feature matrix, deny, fuzz smoke, spec trace, unsafe check (spec 23.3)
+- [x] Add `LICENSE-MIT` (copyright TPT Solutions) (spec 23.2)
+- [x] Add `LICENSE-APACHE` (full Apache-2.0 text) (spec 23.2)
+- [x] Add `NOTICE` with TPT Solutions copyright (spec 23.2)
+- [x] Add `README.md` (spec 23.2)
+- [x] Add `CLEAN_ROOM.md` with provenance rules and contributor log (spec 23.1)
+- [x] Add `DESIGN.md` (spec 6)
+- [x] Add `SPEC_TRACE.md` skeleton, section -> module -> tests (spec 22.5)
+- [x] Add `deny.toml` with license and ban rules (spec 23.3). Deny Apache-only licenses for dependencies, allow only dependencies that offer MIT (`MIT` or `MIT OR Apache-2.0`). `cargo deny check licenses bans` passes.
+- [x] Add `.gitignore` for Rust (`target/`)
+- [x] Decide Rust toolchain version and add `rust-toolchain.toml` (MSRV). Decided: `stable` for development, MSRV 1.75 in `Cargo.toml`. CI runs the MSRV job. The MSRV job has not been run locally (1.75 is not installed here).
+- [x] Create `Cargo.toml` with dual license field `MIT OR Apache-2.0`, zero dependencies (spec 6, 7, 23.2)
+- [x] Create `src/lib.rs` with `#![forbid(unsafe_code)]` (spec 23.3)
+- [x] Add every first-party file header `// SPDX-License-Identifier: MIT OR Apache-2.0` (spec 23.2). Checked: all 50 `.rs` files.
+- [x] Decide first commit scope and make it (spec 26). Scope: the M0 foundation as one commit on branch `m0-foundation`, not pushed.
+- [~] Add CI workflow: fmt, clippy, test, feature matrix, deny, fuzz smoke, spec trace, unsafe check (spec 23.3). Written in `.github/workflows/ci.yml` but not run on a real runner. Fuzz smoke and spec trace check are missing because their targets and tools do not exist yet.
 
 ## 1. Open design decisions (resolve in M0, spec 25)
 
-- [ ] 25.1 Numeric type: `f64` first, or decimal/rational now?
-- [ ] 25.2 Atom interning: custom deterministic interner, or approved primitive?
-- [ ] 25.3 `StyleTree` return type: slices, iterators, or arena handles?
-- [ ] 25.4 Pseudo-elements: generated nodes in the tree, or side tables keyed by node + pseudo?
-- [ ] 25.5 Font metrics: what belongs in CSS vs. layout/font system?
-- [ ] 25.6 Container query size requests without layout cycles
-- [ ] 25.7 Animation interpolation: `tpt-css`, `tpt-layout`, or separate crate?
-- [ ] 25.8 CSSOM round-trip fidelity for M3
-- [ ] 25.9 Web UA stylesheet location: `tpt-css`, `tpt-dom`, or `tpt-html`?
-- [ ] 25.10 Dependency policy: no third-party core dependencies; no Apache-only dependencies; any dependency must offer MIT
+All decisions are recorded in DESIGN.md section 2.
+
+- [x] 25.1 Numeric type: `f64` first, or decimal/rational now? Decided: `f64` for M0.
+- [x] 25.2 Atom interning: custom deterministic interner, or approved primitive? Decided: no interner in M0, owned strings and `'static` keyword tables. Revisit in M1.
+- [x] 25.3 `StyleTree` return type: slices, iterators, or arena handles? Decided: slices for children, references for attributes and state.
+- [x] 25.4 Pseudo-elements: generated nodes in the tree, or side tables keyed by node + pseudo? Decided: side tables. Implemented in M1.
+- [x] 25.5 Font metrics: what belongs in CSS vs. layout/font system? Decided: CSS does only font-relative arithmetic.
+- [x] 25.6 Container query size requests without layout cycles. Decided: size containers only, host-ordered. Implemented in M2.
+- [x] 25.7 Animation interpolation: `tpt-css`, `tpt-layout`, or separate crate? Decided: separate crate.
+- [x] 25.8 CSSOM round-trip fidelity for M3. Decided: canonical serialization, not byte-preserving.
+- [x] 25.9 Web UA stylesheet location: `tpt-css`, `tpt-dom`, or `tpt-html`? Decided: `tpt-html`.
+- [x] 25.10 Dependency policy: no third-party core dependencies; no Apache-only dependencies; any dependency must offer MIT
 
 ## 2. M0: syntax + basic cascade (spec 24, 26)
 
 ### Syntax layer (spec 10)
-- [ ] `syntax/token.rs`: token kinds (spec 10.1)
-- [ ] `syntax/tokenizer.rs`: CSS Syntax 3 tokenizer, escapes, newline normalization, bad strings and URLs
-- [ ] `syntax/component.rs`: component values, simple blocks `()` `[]` `{}`, functions
-- [ ] `syntax/span.rs`: `Span { source, start, end }` on meaningful nodes (spec 10.3)
-- [ ] Bounded input length and token count (spec 19.2)
+- [x] `syntax/token.rs`: token kinds (spec 10.1)
+- [x] `syntax/tokenizer.rs`: CSS Syntax 3 tokenizer, escapes, newline normalization, bad strings and URLs
+- [x] `syntax/component.rs`: component values, simple blocks `()` `[]` `{}`, functions
+- [x] `syntax/span.rs`: `Span { source, start, end }` on meaningful nodes (spec 10.3)
+- [x] Bounded input length and token count (spec 19.2)
 - [ ] Optional comment preservation for tooling
 
 ### AST (spec 11)
-- [ ] `ast/stylesheet.rs`, `ast/rule.rs`, `ast/declaration.rs`, `ast/selector.rs`, `ast/value.rs`
-- [ ] Unknown at-rules preserved but ignored by resolution
+- [~] `ast/stylesheet.rs`, `ast/rule.rs`, `ast/declaration.rs`, `ast/selector.rs`, `ast/value.rs`. `value.rs` is not created: declarations keep their `ComponentValue`s directly.
+- [x] Unknown at-rules preserved but ignored by resolution
 
 ### Parser (spec 8.1, 11, 19)
-- [ ] `parse/stylesheet.rs`: `parse_stylesheet(input, ParseOptions) -> ParsedStylesheet`
-- [ ] `parse/declarations.rs`: declarations, custom property names (`--`)
-- [ ] `parse/rules.rs`: style rules and at-rule skeleton
-- [ ] `parse/diagnostics.rs`: `Diagnostic`, severity, codes, spec URL (spec 19.3)
-- [ ] Spec-defined error recovery: invalid declarations do not abort the sheet
-- [ ] `limits.rs`: `ParseLimits` with configurable defaults (spec 19.2)
+- [x] `parse/stylesheet.rs`: `parse_stylesheet(input, ParseOptions) -> ParsedStylesheet`
+- [x] `parse/declarations.rs`: declarations, custom property names (`--`)
+- [x] `parse/rules.rs`: style rules and at-rule skeleton
+- [x] `parse/diagnostics.rs`: `Diagnostic`, severity, codes, spec URL (spec 19.3)
+- [x] Spec-defined error recovery: invalid declarations do not abort the sheet. Exception: a nesting-depth violation drops the whole sheet (DESIGN.md 3.8).
+- [x] `limits.rs`: `ParseLimits` with configurable defaults (spec 19.2)
 
 ### Selectors (spec 12)
-- [ ] `parse/selectors.rs`: Tier 0 selectors: `*`, type, `#id`, `.class`, `[attr]`, `[attr=value]`, descendant, child, `:root`
-- [ ] State selectors `:hover`, `:active`, `:focus` (adapter-provided state)
-- [ ] `selectors/specificity.rs`: explicit `Specificity { a, b, c }` computed at parse time (spec 12.3)
-- [ ] `selectors/matching.rs`: right-to-left matching, candidate filtering by id/class/type
-- [ ] Selector complexity bound (spec 19.2)
+- [x] `parse/selectors.rs`: Tier 0 selectors: `*`, type, `#id`, `.class`, `[attr]`, `[attr=value]`, descendant, child, `:root`
+- [x] State selectors `:hover`, `:active`, `:focus` (adapter-provided state)
+- [x] `selectors/specificity.rs`: explicit `Specificity { a, b, c }` computed at parse time (spec 12.3)
+- [~] `selectors/matching.rs`: right-to-left matching is done. Candidate filtering by id, class, and type is not done.
+- [x] Selector complexity bound (spec 19.2)
 
 ### Cascade (spec 13)
-- [ ] `cascade/origin.rs`: `Origin`, `Importance` (spec 13.2)
-- [ ] `cascade/order.rs`: source order and `DeclarationOrder`
-- [ ] `cascade/specificity.rs`
-- [ ] `cascade/collect.rs`: collect matched declarations
-- [ ] Cascade key struct (spec 13.3) and origin/importance ordering
-- [ ] Inline style enters cascade by origin/importance/specificity/order (spec 13.5)
-- [ ] Shorthand expansion to longhands for cascade (spec 13.6, 15.3)
-- [ ] CSS-wide keywords `initial`, `inherit`, `unset` (spec 13.8)
+- [x] `cascade/origin.rs`: `Origin`, `Importance` (spec 13.2)
+- [x] `cascade/order.rs`: source order and `DeclarationOrder`
+- [x] `cascade/specificity.rs`: merged into `selectors/specificity.rs`, which the cascade uses (DESIGN.md 5)
+- [x] `cascade/collect.rs`: collect matched declarations. Collection lives in `style/resolver.rs` (DESIGN.md 5).
+- [x] Cascade key struct (spec 13.3) and origin/importance ordering
+- [x] Inline style enters cascade by origin/importance/specificity/order (spec 13.5)
+- [ ] Shorthand expansion to longhands for cascade (spec 13.6, 15.3). No shorthands are registered yet (M1).
+- [x] CSS-wide keywords `initial`, `inherit`, `unset` (spec 13.8). `revert` and `revert-layer` are M2.
 
 ### Values (spec 14, basic)
-- [ ] `values/number.rs`, `values/length.rs` (px, em, rem, %)
-- [ ] `values/color.rs`: named, `transparent`, `#rgb`, `#rrggbb`, `rgb()`, `rgba()`
-- [ ] `values/serialize.rs`: deterministic serialization
+- [~] `values/number.rs`, `values/length.rs` (px, em, rem, %). `length.rs` is done. Numbers are `Value::Number` and the tokenizer. There is no `number.rs`.
+- [~] `values/color.rs`: named, `transparent`, `#rgb`, `#rrggbb`, `rgb()`, `rgba()`. Named colors are partial: the 16 basic colors and `orange`. The full table is pending.
+- [x] `values/serialize.rs`: deterministic serialization (canonical form, not yet spec-exact CSSOM)
 
 ### Properties and style (spec 15, 16)
-- [ ] `properties/registry.rs`: data-driven `PropertySpec` (spec 15.1)
-- [ ] Initial M0 property set (spec 15.2, 37 properties)
-- [ ] `properties/aliases.rs`: explicit alias registry, no string stripping (spec 15.4)
-- [ ] `style/resolver.rs`: 14-step pipeline (spec 16.1)
-- [ ] `style/inheritance.rs`
-- [ ] `style/computed.rs`: `ComputedStyle` with typed accessors and property-ID storage (spec 8.3)
-- [ ] `StyleMap` with `get`, `get_pseudo`, `custom_property` (spec 8.3)
-- [ ] Font-size computed first (spec 16.1)
+- [x] `properties/registry.rs`: data-driven `PropertySpec` (spec 15.1)
+- [x] Initial M0 property set (spec 15.2, 37 properties)
+- [ ] `properties/aliases.rs`: explicit alias registry, no string stripping (spec 15.4). Not started (M1).
+- [~] `style/resolver.rs`: 14-step pipeline (spec 16.1). Steps 1–4 and 9–13 are done. Steps 5–8 (custom properties, `var()`) are M1.
+- [x] `style/inheritance.rs`: inheritance is in `style/resolver.rs` (DESIGN.md 5)
+- [x] `style/computed.rs`: `ComputedStyle` with typed accessors and property-ID storage (spec 8.3)
+- [~] `StyleMap` with `get`, `get_pseudo`, `custom_property` (spec 8.3). `get` is done. `get_pseudo` and `custom_property` are M1.
+- [x] Font-size computed first (spec 16.1)
 
 ### Tree contract (spec 9)
-- [ ] `tree/node.rs`: `StyleTree` trait, `NodeId` generational id (spec 9)
-- [ ] `tree/attributes.rs`, `tree/state.rs` (`ElementState`), `tree/scope.rs`, `tree/contract.rs`
-- [ ] No HTML-specific names in core (spec 4.3)
+- [x] `tree/node.rs`: `StyleTree` trait, `NodeId` generational id (spec 9)
+- [x] `tree/attributes.rs`, `tree/state.rs` (`ElementState`), `tree/scope.rs`, `tree/contract.rs`
+- [x] No HTML-specific names in core (spec 4.3). Checked with a case-sensitive search of `src/`.
 
 ### Tests and fixtures (spec 22)
-- [ ] Golden test harness
-- [ ] `tests/syntax/` tokenizer golden tests
-- [ ] `tests/parse/` stylesheet and declaration parser tests
-- [ ] `tests/selectors/` selector parse and match tests, specificity tests
-- [ ] `tests/cascade/` origin and order tests
-- [ ] `tests/style/` inheritance and initial value tests
-- [ ] `tests/integration/` same resolver on AppFront-style tree and DOM-adapter-style tree (spec 26)
-- [ ] `fixtures/mit/` own fixtures, written from spec behavior (spec 22.2)
-- [ ] `fixtures/golden/`
+- [x] Golden test harness
+- [x] `tests/syntax/` tokenizer golden tests (and component value tests)
+- [x] `tests/parse/` stylesheet and declaration parser tests
+- [x] `tests/selectors/` selector parse and match tests, specificity tests
+- [x] `tests/cascade/` origin and order tests
+- [x] `tests/style/` inheritance and initial value tests
+- [x] `tests/integration/` same resolver on AppFront-style tree and DOM-adapter-style tree (spec 26)
+- [x] `fixtures/mit/` own fixtures, written from spec behavior (spec 22.2)
+- [x] `fixtures/golden/`
 
 ### M0 acceptance (spec 24)
-- [ ] Parse a stylesheet
-- [ ] Match basic selectors against an abstract tree
-- [ ] Compute styles for a static tree
-- [ ] Deterministic output
-- [ ] No DOM dependency
-- [ ] No third-party core dependency
-- [ ] No unsafe
+- [x] Parse a stylesheet
+- [x] Match basic selectors against an abstract tree
+- [x] Compute styles for a static tree
+- [x] Deterministic output
+- [x] No DOM dependency
+- [x] No third-party core dependency
+- [x] No unsafe
 
 ## 3. M1: practical CSS (spec 24)
 
@@ -194,17 +197,17 @@ Legend: `[ ]` not started, `[~]` in progress, `[x]` done.
 
 ## 7. Cross-cutting (every milestone)
 
-- [ ] Each algorithm cites its spec section (spec 2.5)
-- [ ] Each supported property, selector, cascade rule has tests (spec 2.5)
-- [ ] `SPEC_TRACE.md` updated (spec 22.5)
-- [ ] `CLEAN_ROOM.md` provenance log updated for each contributor (spec 23.1)
+- [~] Each algorithm cites its spec section (spec 2.5). Most modules cite their section. Not audited for every function.
+- [~] Each supported property, selector, cascade rule has tests (spec 2.5). Covered for M0. Not every property has its own test.
+- [x] `SPEC_TRACE.md` updated (spec 22.5)
+- [x] `CLEAN_ROOM.md` provenance log updated for each contributor (spec 23.1). Entry added for the M0 batch; it needs human review (see the log).
 - [ ] Fuzz targets: tokenizer, stylesheet, selector, declaration, var, calc, color (spec 22.3)
 - [ ] Property-based tests: specificity, cascade stability, shorthand round trip, calc invariants, `:is`/`:where` equivalence, cycle detection, serialization determinism (spec 22.4)
 - [ ] Performance targets measured: tokenizer throughput, static tree restyle (spec 21.1)
-- [ ] Bounds enforced: tokens, nesting, selector work, var depth, calc depth, stylesheet and rule counts (spec 20.3)
-- [ ] No panics on hostile input (spec 19.1)
-- [ ] Determinism: no hash-map iteration in cascade (spec 21.3)
-- [ ] `cargo deny check licenses` and `bans` pass
-- [ ] No Apache-only dependencies in the dependency tree (spec 23.2)
-- [ ] No `unsafe` (spec 23.3)
-- [ ] Each commit keeps `cargo test`, `cargo test --no-default-features`, `cargo test --features web` green
+- [~] Bounds enforced: tokens, nesting, selector work, var depth, calc depth, stylesheet and rule counts (spec 20.3). Done: tokens, nesting, selector work, rule and declaration counts, input size. Not yet: var depth, calc depth, stylesheet count.
+- [~] No panics on hostile input (spec 19.1). A seeded randomized test passes (`tests/integration`). It is not coverage-guided fuzzing.
+- [x] Determinism: no hash-map iteration in cascade (spec 21.3)
+- [ ] `cargo deny check licenses` and `bans` pass. Passes locally. Not yet run in CI on a runner.
+- [x] No Apache-only dependencies in the dependency tree (spec 23.2). The core has no dependencies.
+- [x] No `unsafe` (spec 23.3)
+- [x] Each commit keeps `cargo test`, `cargo test --no-default-features`, `cargo test --features web` green. Checked on the working tree for the M0 batch.
