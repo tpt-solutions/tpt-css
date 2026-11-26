@@ -179,3 +179,53 @@ fn sibling_constructs_scale_separately() {
         );
     }
 }
+
+/// Splits a full resolve into the part that does not depend on the sheet (tree
+/// walk and computing every property) and the part that does (selector
+/// matching and the cascade). An empty sheet computes initial values for every
+/// element, so its time is the first part; the difference from a real sheet is
+/// the second. This decides whether style sharing (DESIGN.md decision 35) can
+/// save much: sharing skips computation, not matching.
+#[test]
+#[ignore]
+fn resolve_split_between_computation_and_matching() {
+    let mut t = TestTree::new(NodeKind::Element);
+    let root = t.root();
+    t.nodes[0].name.local = "root".into();
+    let mut frontier = vec![root];
+    let mut count = 1;
+    while count < 10_000 {
+        let mut next = Vec::new();
+        for parent in frontier {
+            for _ in 0..10 {
+                if count >= 10_000 {
+                    break;
+                }
+                next.push(t.element(parent, "div"));
+                count += 1;
+            }
+        }
+        frontier = next;
+    }
+    let sheet = "div { margin-left: 1px; color: red } .a div { padding: 2px } div:nth-child(2n) { margin-top: 3px }";
+    let time = |css: &str| {
+        let mut resolver = StyleResolver::new(ResolverConfig::default());
+        resolver.add_stylesheet(parse_sheet(css).stylesheet, Origin::Author);
+        let env = Environment::default();
+        let _ = resolver.resolve(&t, &env);
+        let start = Instant::now();
+        let rounds = 5;
+        for _ in 0..rounds {
+            let _ = resolver.resolve(&t, &env);
+        }
+        start.elapsed() / rounds
+    };
+    let empty = time("");
+    let full = time(sheet);
+    println!(
+        "10,000 elements: empty sheet {:?} (computation and traversal), real sheet {:?}, matching and cascade about {:?}",
+        empty,
+        full,
+        full.saturating_sub(empty)
+    );
+}
