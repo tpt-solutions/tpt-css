@@ -497,7 +497,9 @@ engineering measurements, not claims about other machines (spec 21.1).
     The remaining cost is spread over the per-property work (specified value,
     compute, store) and the per-element cascade setup. A sampling profile would
     settle it. `samply` was tried on this Windows machine and hung without
-    producing a profile, so a profile needs another machine or tool. Sharing
+    producing a profile. The profile therefore runs on Linux CI, in the manually
+    triggered `profile` workflow (`.github/workflows/profile.yml`), which uploads
+    the profile and the timing log as the `resolve-profile` artifact. Sharing
     skips all of that per-property work on a hit, so it remains the largest
     lever. Build it once a profile confirms that per-property work dominates.
 
