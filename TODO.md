@@ -26,7 +26,7 @@ Legend: `[ ]` not started, `[~]` in progress or partly done (the note says what 
 - [x] Create `src/lib.rs` with `#![forbid(unsafe_code)]` (spec 23.3)
 - [x] Add every first-party file header `// SPDX-License-Identifier: MIT OR Apache-2.0` (spec 23.2). Checked: all 50 `.rs` files.
 - [x] Decide first commit scope and make it (spec 26). Scope: the M0 foundation as one commit on branch `m0-foundation`, not pushed.
-- [~] Add CI workflow: fmt, clippy, test, feature matrix, deny, fuzz smoke, spec trace, unsafe check (spec 23.3). Written in `.github/workflows/ci.yml` but not run on a real runner. Fuzz smoke and spec trace check are missing because their targets and tools do not exist yet.
+- [~] Add CI workflow: fmt, clippy, test, feature matrix, MSRV (1.75), deny, unsafe check, and the spec trace check (spec 23.3). Written in `.github/workflows/ci.yml`, but not run on a real runner. The spec trace check is a test in `cargo test` (`tests/integration/spec_trace.rs`). The fuzz smoke job is missing, because there are no fuzz targets. The local equivalents are run for each batch.
 
 ## 1. Open design decisions (resolve in M0, spec 25)
 
@@ -161,7 +161,7 @@ All decisions are recorded in DESIGN.md section 2.
 - [~] `:host`, `:host-context()`, `::slotted()`, `::part()`, `:state()` (spec 12.2 Tier 2). Not started; these are shadow-tree selectors and belong to M4.
 - [x] Modern state selectors.
 - [x] Modern pseudo-elements: `::selection`, `::backdrop`, `::file-selector-button`.
-- [~] Layer and scope behavior tests (spec 22.1). Layer tests are done; scope tests cover the root, the limit, and `:scope`.
+- [x] Layer and scope behavior tests (spec 22.1). Layers: order, nesting, `revert-layer`, and unlayered precedence (`tests/cascade/layers.rs`). Scope: root, limit, `:scope`, and proximity ordering after specificity (`tests/selectors/m3.rs`, `tests/style/m3.rs`).
 - [x] Registered custom property tests.
 - [x] Container query integration test with size provider.
 - [x] Animation declarations participate in cascade test.
