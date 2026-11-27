@@ -96,7 +96,7 @@ jobs:
         run: |
           cd fuzz
           for target in tokenizer stylesheet declaration selector calc color; do
-            cargo +nightly fuzz run "$target" -- -max_total_time=60
+            cargo +nightly fuzz run "$target" --target x86_64-unknown-linux-gnu -- -max_total_time=60
           done
 
   playground:
