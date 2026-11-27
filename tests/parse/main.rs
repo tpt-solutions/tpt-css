@@ -239,3 +239,22 @@ fn comment_spans_are_kept_only_when_asked_for() {
         .collect();
     assert_eq!(texts, vec!["/* a */", "/* b */"]);
 }
+
+/// Regression test for a fuzzer out-of-memory. Each nested level clones the
+/// parent selector list into `:is()` once per child selector, so a comma list
+/// nested inside itself doubles the list at every level. The size limit must
+/// stop this well before it allocates the full tree.
+#[test]
+fn nested_comma_lists_are_bounded_by_resolved_selector_size() {
+    let css = format!("{}{}", "a,b{".repeat(40), "}".repeat(40));
+    let parsed = parse_stylesheet(&css, ParseOptions::default());
+    assert!(parsed
+        .diagnostics
+        .iter()
+        .any(|d| d.code == DiagnosticCode::LimitExceeded));
+    let total: usize = style_rules(&css)
+        .iter()
+        .map(|r| r.selectors.selectors.len())
+        .sum();
+    assert!(total < 10_000, "resolved selectors grew to {total}");
+}

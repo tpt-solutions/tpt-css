@@ -10,7 +10,9 @@
 use super::declarations::{parse_block_contents, within_math_depth};
 use super::diagnostics::{Diagnostic, DiagnosticCode};
 use super::media::{parse_container_prelude, parse_media_queries};
-use super::selectors::{contains_nesting, parse_selector_list, resolve_nesting, span_of};
+use super::selectors::{
+    contains_nesting, parse_selector_list, resolve_nesting, selector_size, span_of,
+};
 use super::supports::supports_condition;
 use crate::ast::selector::SelectorList;
 use crate::ast::{
@@ -720,6 +722,15 @@ fn nested_rule(
         }
     };
     let resolved = resolve_nesting(&child, parent);
+    if selector_size(&resolved) > limits.max_resolved_selector_size {
+        diagnostics.push(Diagnostic::error(
+            DiagnosticCode::LimitExceeded,
+            span,
+            "nested selector list too large; nested rule dropped",
+            Some(NESTING_URL),
+        ));
+        return;
+    }
     let (declarations, rules) =
         parse_style_block(&block.value, limits, diagnostics, depth + 1, &resolved);
     out.push(Rule::Style(StyleRule {

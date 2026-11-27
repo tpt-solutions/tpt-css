@@ -304,6 +304,37 @@ fn parse_compound(
     Ok((CompoundSelector { simple }, i, pseudo))
 }
 
+/// Counts the selector nodes in a list, including the lists inside functional
+/// pseudo-classes. Used to bound nested rules (see `max_resolved_selector_size`).
+pub(crate) fn selector_size(list: &SelectorList) -> usize {
+    list.selectors.iter().map(complex_size).sum()
+}
+
+fn complex_size(complex: &ComplexSelector) -> usize {
+    1 + complex
+        .compounds
+        .iter()
+        .flat_map(|c| c.simple.iter())
+        .map(simple_size)
+        .sum::<usize>()
+}
+
+fn simple_size(simple: &SimpleSelector) -> usize {
+    match simple {
+        SimpleSelector::Not(list)
+        | SimpleSelector::Is(list)
+        | SimpleSelector::Where(list)
+        | SimpleSelector::TimeState { list, .. } => 1 + selector_size(list),
+        SimpleSelector::Has(relatives) => {
+            1 + relatives
+                .iter()
+                .map(|r| complex_size(&r.selector))
+                .sum::<usize>()
+        }
+        _ => 1,
+    }
+}
+
 /// Replaces every `&` in a nested selector list with the parent selector list
 /// (CSS Nesting). A complex selector with no `&` gets an implicit `& ` descendant
 /// prefix. The result matches on its own, so the matcher needs no nesting case.

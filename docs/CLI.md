@@ -61,6 +61,13 @@ library (`StyleMap::get_pseudo`).
 
 ## `inspect`
 
+Takes the same JSON fixture as `compute`. For each element it prints the
+winning declaration of each property: its origin, its cascade layer, and its
+specificity. Use it to find out which rule set a value. The playground's
+Inspect button shows the same report.
+
+## `inspect`
+
 Resolves the same fixture as `compute`, and for each element prints the winning
 declaration of each property it has. Each line has the value, then, in square
 brackets, the origin (`author`, `user-agent`, and so on), `important` when the

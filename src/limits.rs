@@ -17,6 +17,10 @@ pub struct ParseLimits {
     pub max_nesting_depth: usize,
     /// Maximum number of compound selectors in one complex selector.
     pub max_selector_complexity: usize,
+    /// Maximum size of a nested rule's resolved selector list, counted in
+    /// selector nodes. Nesting a comma list inside another can double the
+    /// list at each level, so this bounds the work done per nested rule.
+    pub max_resolved_selector_size: usize,
     /// Maximum declarations in one declaration block.
     pub max_declarations_per_block: usize,
     /// Maximum rules in one stylesheet.
@@ -38,6 +42,7 @@ impl Default for ParseLimits {
             max_tokens: 4_000_000,
             max_nesting_depth: 256,
             max_selector_complexity: 64,
+            max_resolved_selector_size: 1024,
             max_declarations_per_block: 4096,
             max_rules_per_sheet: 1_000_000,
             max_var_depth: 32,

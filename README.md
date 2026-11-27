@@ -30,6 +30,9 @@ implements `StyleTree` for a small arena tree and prints computed colors:
 cargo run --example minimal
 ```
 
+More examples are in `examples/`: `dark_mode`, `diagnostics`,
+`media_and_container`, and `cssom_edit` (feature `cssom`).
+
 The core calls are:
 
 ```rust,ignore
@@ -44,12 +47,27 @@ let styles = resolver.resolve(&tree, &Environment::default());
 
 `tests/examples.rs` checks the example's output, so it stays in step with the API.
 
+## Command line and playground
+
+The crate ships a dependency-free `tpt-css` binary. See
+[docs/CLI.md](docs/CLI.md) for the full usage.
+
+```sh
+cargo run -- check style.css          # diagnostics for a stylesheet
+cargo run -- compute tree.json        # computed styles for a fixture tree
+cargo run -- inspect tree.json        # winning declaration of each property
+```
+
+The WASM playground in [playground/](playground/) runs the engine in a
+browser page. Its `build.sh` builds the module.
+
 ## Build and test
 
 ```sh
 cargo test                       # default features (appfront)
 cargo test --no-default-features
 cargo test --features web
+cargo test --features cssom
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo deny check licenses bans
@@ -63,13 +81,27 @@ TPT_UPDATE_GOLDEN=1 cargo test --test golden
 
 Review the diff before committing the new files.
 
+Enable the pre-commit hook (`cargo fmt --check` and clippy) once per clone:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+The fuzz targets are a separate package in `fuzz/`. Their bodies also run as a
+seeded smoke test under `cargo test`.
+
 ## Layout
 
 ```text
-src/        engine (see DESIGN.md section 5 for the module map)
-tests/      one test target per area, plus tests/common (a test tree)
-fixtures/   own MIT fixtures (fixtures/mit) and golden files (fixtures/golden)
-spec.txt    design specification
+src/          engine (see DESIGN.md section 5 for the module map)
+src/bin/      the tpt-css command line
+tests/        one test target per area, plus tests/common (a test tree)
+examples/     runnable examples
+fixtures/     own MIT fixtures (fixtures/mit) and golden files (fixtures/golden)
+fuzz/         fuzz targets (cargo-fuzz)
+playground/   WASM playground
+docs/         status, command line, and generated property support table
+spec.txt      design specification
 ```
 
 ## License

@@ -1903,6 +1903,7 @@ pub struct ParseLimits {
     pub max_tokens: usize,
     pub max_nesting_depth: usize,
     pub max_selector_complexity: usize,
+    pub max_resolved_selector_size: usize,
     pub max_declarations_per_block: usize,
     pub max_rules_per_sheet: usize,
     pub max_var_depth: usize,

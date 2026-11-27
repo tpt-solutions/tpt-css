@@ -18,7 +18,8 @@ published (`publish = false` in `Cargo.toml`), so there are no released versions
   text (DESIGN.md 37).
 - `tpt-css` command line: `check` and `compute` (`docs/CLI.md`, DESIGN.md 40). It has
   no dependencies, and `compute` takes `--css` for extra stylesheets.
-- WASM playground in `playground/` (DESIGN.md 40), built in CI for `wasm32-unknown-unknown`.
+- WASM playground in `playground/` (DESIGN.md 40), built in CI for `wasm32-unknown-unknown`,
+  with an Inspect button for the winning declarations (DESIGN.md 50).
 - Computed-style snapshots for `fixtures/mit/` (DESIGN.md 41) and a generated support
   table in `docs/SUPPORT.md` (DESIGN.md 42). CI fails when either is stale.
 - `background` shorthand: one image and one color (DESIGN.md 43).
@@ -86,4 +87,10 @@ published (`publish = false` in `Cargo.toml`), so there are no released versions
 
 ### Fixed
 
+- Nested comma lists could grow exponentially with nesting depth (a fuzzer
+  out-of-memory on a 266-byte input, about 1.9 s to parse). A nested rule whose
+  resolved selector list exceeds the new `max_resolved_selector_size` limit
+  (default 1024 nodes) is now dropped with a `LimitExceeded` diagnostic.
 - Three broken rustdoc links that failed `cargo doc` with warnings as errors.
+- The `fuzz-smoke` CI job failed at build time on Linux: cargo-fuzz defaults to the
+  musl target, which the runner lacks. The job now passes the gnu target explicitly.
