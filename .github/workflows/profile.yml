@@ -16,7 +16,7 @@ jobs:
       # Keep debug symbols in the release test binary so the profile names functions.
       CARGO_PROFILE_RELEASE_DEBUG: "true"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Install samply
         run: cargo install samply --locked
@@ -36,7 +36,7 @@ jobs:
           samply record --save-only -o profile/resolve.json.gz -- \
             "${{ steps.bin.outputs.path }}" resolve_split --ignored --nocapture \
             | tee profile/timings.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: resolve-profile
           path: profile/
