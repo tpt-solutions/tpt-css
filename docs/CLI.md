@@ -5,6 +5,7 @@ The crate ships a small binary. It has no dependencies.
 ```text
 tpt-css check <file.css | ->            diagnostics for a stylesheet
 tpt-css compute <tree.json> [--all] [--css <file.css>]...   computed styles for a fixture tree
+tpt-css inspect <tree.json>                                 the winning declaration of each property
 ```
 
 ## `check`
@@ -57,6 +58,25 @@ fixture's own, at author origin. The option can repeat.
 
 Pseudo-elements are not printed. Their styles are available through the
 library (`StyleMap::get_pseudo`).
+
+## `inspect`
+
+Resolves the same fixture as `compute`, and for each element prints the winning
+declaration of each property it has. Each line has the value, then, in square
+brackets, the origin (`author`, `user-agent`, and so on), `important` when the
+declaration is `!important`, the layer rank, `inline` for a `style` attribute,
+the specificity as `a,b,c`, and where it was declared (`sheet`, `rule`, and
+`declaration` indexes, or `style attribute`).
+
+```text
+0.0 p.note
+  color: rgb(0, 0, 255) [author; important; layer 0; specificity 1,1,1; sheet 0 rule 1 declaration 0]
+```
+
+The layer rank is the engine's cascade rank (`cascade::layer_rank`). Unlayered
+normal declarations use `unlayered` in place of a rank. Unlike `compute`, this
+lists every property that has a winning declaration at any origin, including the
+user-agent styles that `compute` leaves out. A property with no declaration has no line.
 
 Exit status: `0` on success, `2` for a usage error, a read error, a JSON error,
 or a fixture without a `root`.

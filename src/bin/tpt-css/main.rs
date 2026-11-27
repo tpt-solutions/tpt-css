@@ -6,6 +6,7 @@
 //! ```text
 //! tpt-css check <file.css | ->            diagnostics for a stylesheet
 //! tpt-css compute <tree.json> [--all]     computed styles for a fixture tree
+//! tpt-css inspect <tree.json>             the winning declaration of each property
 //! ```
 //!
 //! `check` exits with 1 if any error was reported, 2 on a usage or read error.
@@ -24,7 +25,8 @@ use std::process::ExitCode;
 
 const USAGE: &str = "usage:
   tpt-css check <file.css | ->
-  tpt-css compute <tree.json> [--all] [--css <file.css>]...";
+  tpt-css compute <tree.json> [--all] [--css <file.css>]...
+  tpt-css inspect <tree.json>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -37,6 +39,7 @@ fn main() -> ExitCode {
                 ExitCode::from(2)
             }
         },
+        Some("inspect") if args.len() == 2 => inspect(&args[1]),
         _ => {
             eprintln!("{USAGE}");
             ExitCode::from(2)
@@ -97,6 +100,22 @@ fn parse_compute_flags(flags: &[String]) -> Result<(bool, Vec<String>), String> 
 
 fn compute(path: &str, all: bool, sheets: &[String]) -> ExitCode {
     let result = read_input(path).and_then(|text| fixture::compute_report(&text, all, sheets));
+    match result {
+        Ok(lines) => {
+            for line in lines {
+                println!("{line}");
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn inspect(path: &str) -> ExitCode {
+    let result = read_input(path).and_then(|text| fixture::inspect_report(&text));
     match result {
         Ok(lines) => {
             for line in lines {

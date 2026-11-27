@@ -7,9 +7,12 @@
 //! of the library's public API.
 
 use crate::json::{self, Json};
+use tpt_css::cascade::UNLAYERED_NORMAL;
+use tpt_css::properties::SpecifiedValue;
 use tpt_css::tree::{
     Attributes, ElementState, NamespaceId, NodeId, NodeKind, QualifiedName, StyleTree,
 };
+use tpt_css::values::serialize::serialize_value;
 use tpt_css::{
     parse_declaration_list, parse_stylesheet, ComputedStyle, Environment, Origin, ParseOptions,
     ResolverConfig, Severity, StyleResolver,
@@ -51,6 +54,47 @@ pub fn compute_report(
     all: bool,
     extra_sheets: &[String],
 ) -> Result<Vec<String>, String> {
+    let (mut resolver, tree, env) = load(text, extra_sheets)?;
+    let map = resolver.resolve(&tree, &env).clone();
+
+    // The same tree with no author styles, neither sheets nor inline. A property
+    // is listed when an author style changed it, so `currentcolor` and the
+    // initial values do not show up on every element.
+    let mut bare = tree.clone();
+    for node in &mut bare.nodes {
+        node.inline = None;
+    }
+    let baseline = StyleResolver::new(ResolverConfig::default())
+        .resolve(&bare, &env)
+        .clone();
+
+    let mut lines = Vec::new();
+    // Element paths are child indexes from the document, for example `0.2.1`.
+    let mut stack = vec![(tree.root(), String::new())];
+    while let Some((node, path)) = stack.pop() {
+        if tree.kind(node) == NodeKind::Element {
+            let style = map.get(node).ok_or("an element was not styled")?;
+            lines.push(format!("{path} {}", label_of(&tree, node)));
+            push_changed(&mut lines, style, baseline.get(node), all);
+        }
+        for (i, &child) in tree.children(node).iter().enumerate().rev() {
+            let child_path = if path.is_empty() {
+                i.to_string()
+            } else {
+                format!("{path}.{i}")
+            };
+            stack.push((child, child_path));
+        }
+    }
+    Ok(lines)
+}
+
+/// Reads a fixture: its stylesheets (then `extra_sheets`, at author origin), its
+/// viewport, and its tree. Returns the resolver, the tree, and the environment.
+fn load(
+    text: &str,
+    extra_sheets: &[String],
+) -> Result<(StyleResolver, Fixture, Environment), String> {
     let fixture = json::parse(text)?;
 
     let mut sheets = Vec::new();
@@ -88,27 +132,56 @@ pub fn compute_report(
         .ok_or("the fixture needs a \"root\" node")?;
     let mut tree = Fixture::new();
     tree.add(tree.root(), root)?;
-    let map = resolver.resolve(&tree, &env).clone();
+    Ok((resolver, tree, env))
+}
 
-    // The same tree with no author styles, neither sheets nor inline. A property
-    // is listed when an author style changed it, so `currentcolor` and the
-    // initial values do not show up on every element.
-    let mut bare = tree.clone();
-    for node in &mut bare.nodes {
-        node.inline = None;
-    }
-    let baseline = StyleResolver::new(ResolverConfig::default())
-        .resolve(&bare, &env)
-        .clone();
-
+/// For each element, the winning declaration of each property it has: the value,
+/// its origin, whether it is `!important`, its layer, its specificity, and where it
+/// was declared (sheet, rule, and declaration index). Inline declarations have
+/// the sheet index `inline`. Elements are listed in document order, with the same
+/// paths as `compute_report`.
+pub fn inspect_report(text: &str) -> Result<Vec<String>, String> {
+    let (resolver, tree, env) = load(text, &[])?;
     let mut lines = Vec::new();
-    // Element paths are child indexes from the document, for example `0.2.1`.
     let mut stack = vec![(tree.root(), String::new())];
     while let Some((node, path)) = stack.pop() {
         if tree.kind(node) == NodeKind::Element {
-            let style = map.get(node).ok_or("an element was not styled")?;
             lines.push(format!("{path} {}", label_of(&tree, node)));
-            push_changed(&mut lines, style, baseline.get(node), all);
+            for item in resolver.inspect(&tree, node, &env) {
+                let value = match &item.specified {
+                    SpecifiedValue::Value(v) => serialize_value(v),
+                    other => format!("{other:?}"),
+                };
+                let origin = format!("{:?}", item.origin).to_lowercase();
+                let mut flags = vec![origin];
+                if item.important {
+                    flags.push("important".to_string());
+                }
+                if item.layer == UNLAYERED_NORMAL {
+                    flags.push("unlayered".to_string());
+                } else {
+                    flags.push(format!("layer {}", item.layer));
+                }
+                if item.inline {
+                    flags.push("inline".to_string());
+                }
+                let s = item.specificity;
+                flags.push(format!("specificity {},{},{}", s.a, s.b, s.c));
+                let source = if item.source.sheet == u32::MAX {
+                    "style attribute".to_string()
+                } else {
+                    format!(
+                        "sheet {} rule {} declaration {}",
+                        item.source.sheet, item.source.rule, item.source.declaration
+                    )
+                };
+                flags.push(source);
+                lines.push(format!(
+                    "  {}: {value} [{}]",
+                    item.property,
+                    flags.join("; ")
+                ));
+            }
         }
         for (i, &child) in tree.children(node).iter().enumerate().rev() {
             let child_path = if path.is_empty() {

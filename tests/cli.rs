@@ -108,3 +108,44 @@ fn compute_needs_a_root() {
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("root"));
 }
+
+#[test]
+fn inspect_lists_the_winning_declaration_with_its_origin_and_specificity() {
+    let fixture = r#"{
+        "stylesheets": ["p { color: red } #main p.note { color: blue !important }"],
+        "root": {"element": "div", "id": "main", "children": [
+            {"element": "p", "class": "note", "style": "margin-top: 3px",
+             "children": [{"text": "hi"}]}
+        ]}
+    }"#;
+    let path =
+        std::env::temp_dir().join(format!("tpt-css-cli-inspect-{}.json", std::process::id()));
+    std::fs::write(&path, fixture).unwrap();
+    let out = Command::new(BIN)
+        .args(["inspect", path.to_str().unwrap()])
+        .output()
+        .unwrap();
+    std::fs::remove_file(&path).ok();
+
+    assert_eq!(out.status.code(), Some(0));
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.starts_with("0 div#main\n0.0 p.note\n"), "{text}");
+    // The important author rule beats the plain one, and the note says why.
+    assert!(
+        text.contains("  color: rgb(0, 0, 255) [author; important; layer 0; specificity 1,1,1; sheet 0 rule 1 declaration 0]\n"),
+        "{text}"
+    );
+    // The inline declaration is marked as coming from the style attribute.
+    assert!(
+        text.contains(
+            "  margin-top: 3px [author; unlayered; inline; specificity 0,0,0; style attribute]\n"
+        ),
+        "{text}"
+    );
+}
+
+#[test]
+fn inspect_needs_exactly_one_tree() {
+    let out = Command::new(BIN).args(["inspect"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(2));
+}
