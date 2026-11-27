@@ -687,6 +687,11 @@ fn state_bit_matches(state: StateBits, pseudo: PseudoClass) -> bool {
         PseudoClass::Paused => StateBits::PAUSED,
         PseudoClass::Fullscreen => StateBits::FULLSCREEN,
         PseudoClass::Autofill => StateBits::AUTOFILL,
+        PseudoClass::Muted => StateBits::MUTED,
+        PseudoClass::Buffering => StateBits::BUFFERING,
+        PseudoClass::Stalled => StateBits::STALLED,
+        PseudoClass::Seeking => StateBits::SEEKING,
+        PseudoClass::VolumeLocked => StateBits::VOLUME_LOCKED,
         // Structural pseudo-classes are handled by the caller.
         PseudoClass::Root | PseudoClass::Empty => return false,
     };

@@ -243,6 +243,16 @@ pub enum PseudoClass {
     Fullscreen,
     /// `:autofill`
     Autofill,
+    /// `:muted`
+    Muted,
+    /// `:buffering`
+    Buffering,
+    /// `:stalled`
+    Stalled,
+    /// `:seeking`
+    Seeking,
+    /// `:volume-locked`
+    VolumeLocked,
 }
 
 /// A relative selector inside `:has()`: a complex selector whose subject is

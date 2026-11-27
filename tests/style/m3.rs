@@ -811,6 +811,11 @@ fn host_reported_state_pseudo_classes_match_only_when_set() {
         ("paused", StateBits::PAUSED),
         ("fullscreen", StateBits::FULLSCREEN),
         ("autofill", StateBits::AUTOFILL),
+        ("muted", StateBits::MUTED),
+        ("buffering", StateBits::BUFFERING),
+        ("stalled", StateBits::STALLED),
+        ("seeking", StateBits::SEEKING),
+        ("volume-locked", StateBits::VOLUME_LOCKED),
     ];
     let css = |name: &str| format!("child:{name} {{ color: red }}");
     for (name, bit) in cases {

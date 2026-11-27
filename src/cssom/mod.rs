@@ -620,6 +620,11 @@ fn pseudo_class_name(pseudo: PseudoClass) -> &'static str {
         PseudoClass::Paused => "paused",
         PseudoClass::Fullscreen => "fullscreen",
         PseudoClass::Autofill => "autofill",
+        PseudoClass::Muted => "muted",
+        PseudoClass::Buffering => "buffering",
+        PseudoClass::Stalled => "stalled",
+        PseudoClass::Seeking => "seeking",
+        PseudoClass::VolumeLocked => "volume-locked",
     }
 }
 

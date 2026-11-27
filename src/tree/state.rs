@@ -85,6 +85,16 @@ impl StateBits {
     pub const FULLSCREEN: StateBits = StateBits(1 << 36);
     /// `:autofill`, the value was filled in by the user agent.
     pub const AUTOFILL: StateBits = StateBits(1 << 37);
+    /// `:muted`, a media element is muted.
+    pub const MUTED: StateBits = StateBits(1 << 38);
+    /// `:buffering`, a media element is waiting for data it expects to play.
+    pub const BUFFERING: StateBits = StateBits(1 << 39);
+    /// `:stalled`, a media element's data fetch has stopped unexpectedly.
+    pub const STALLED: StateBits = StateBits(1 << 40);
+    /// `:seeking`, a media element is seeking to a new position.
+    pub const SEEKING: StateBits = StateBits(1 << 41);
+    /// `:volume-locked`, the user agent fixes the volume of a media element.
+    pub const VOLUME_LOCKED: StateBits = StateBits(1 << 42);
 
     /// No bits set.
     pub const fn empty() -> StateBits {
