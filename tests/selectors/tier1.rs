@@ -231,6 +231,19 @@ fn dir_matches_the_inherited_direction() {
 }
 
 #[test]
+fn dir_defaults_to_ltr_when_no_ancestor_sets_a_direction() {
+    let mut t = TestTree::new(NodeKind::Element);
+    let root = t.root();
+    let child = t.element(root, "p");
+    assert!(matches(&t, child, ":dir(ltr)"));
+    assert!(!matches(&t, child, ":dir(rtl)"));
+    // A direction set on a descendant does not reach its ancestors.
+    t.set_dir(child, Direction::Rtl);
+    assert!(matches(&t, child, ":dir(rtl)"));
+    assert!(matches(&t, root, ":dir(ltr)"));
+}
+
+#[test]
 fn pseudo_element_selectors_parse_to_their_target() {
     let sheet = parse_sheet("p::before, a:after, ::marker { }").stylesheet;
     let Rule::Style(rule) = &sheet.rules[0] else {

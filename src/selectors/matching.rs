@@ -492,7 +492,7 @@ impl<'a, T: StyleTree> Matcher<'a, T> {
                 self.pseudo_class_matches(node, *state) && self.list_matches(node, list)
             }
             SimpleSelector::Lang(tag) => language_matches(self.tree, node, tag),
-            SimpleSelector::Dir(dir) => inherited_direction(self.tree, node) == Some(*dir),
+            SimpleSelector::Dir(dir) => inherited_direction(self.tree, node) == *dir,
             SimpleSelector::Has(relatives) => self.has_matches(node, relatives),
             SimpleSelector::Scope => match self.scope {
                 Some(root) => node == root,
@@ -755,16 +755,18 @@ fn inherited_language<T: StyleTree>(tree: &T, node: NodeId) -> Option<&str> {
     None
 }
 
-/// The nearest text direction, from the node or an ancestor.
-fn inherited_direction<T: StyleTree>(tree: &T, node: NodeId) -> Option<Direction> {
+/// The nearest text direction, from the node or an ancestor. When no node in the
+/// chain has one, the direction is `ltr`, the default for the root (HTML, `dir`
+/// attribute; DESIGN.md decision 47).
+fn inherited_direction<T: StyleTree>(tree: &T, node: NodeId) -> Direction {
     let mut current = Some(node);
     while let Some(n) = current {
         if let Some(dir) = tree.direction(n) {
-            return Some(dir);
+            return dir;
         }
         current = tree.parent(n);
     }
-    None
+    Direction::Ltr
 }
 
 /// `:lang(tag)`: the element's language equals `tag` or is a subtag of it
