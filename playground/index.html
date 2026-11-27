@@ -16,7 +16,7 @@
 </head>
 <body>
   <h1>tpt-css playground</h1>
-  <p>Runs the engine in your browser. Check reports diagnostics for the stylesheet. Compute takes a fixture tree (see docs/CLI.md) and lists the computed styles it changed.</p>
+  <p>Runs the engine in your browser. Check reports diagnostics for the stylesheet. Compute takes a fixture tree (see docs/CLI.md) and lists the computed styles it changed. Inspect lists the winning declaration of each property, with its origin, layer, and specificity.</p>
   <div class="panes">
     <div>
       <label for="css">Stylesheet (CSS)</label>
@@ -44,6 +44,7 @@ h1 { color: }</textarea>
     <button id="check">Check stylesheet</button>
     <button id="compute">Compute styles</button>
     <button id="all">Compute (all properties)</button>
+    <button id="inspect">Inspect winning declarations</button>
     <span id="status" class="status">Loading module…</span>
   </div>
   <pre id="out"></pre>

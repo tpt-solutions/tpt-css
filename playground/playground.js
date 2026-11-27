@@ -38,4 +38,6 @@
     run(1, document.getElementById("tree").value);
   document.getElementById("all").onclick = () =>
     run(2, document.getElementById("tree").value);
+  document.getElementById("inspect").onclick = () =>
+    run(3, document.getElementById("tree").value);
 })();

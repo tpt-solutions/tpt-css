@@ -11,7 +11,8 @@
 //! The result starts with `OK` or `ERROR` on its own line, then the report.
 //!
 //! Modes: `0` checks the stylesheet in `a`. `1` computes styles for the fixture
-//! in `a`, listing changed properties. `2` lists every property.
+//! in `a`, listing changed properties. `2` lists every property. `3` lists the
+//! winning declaration of each property for each element.
 //!
 //! The engine's own code is `forbid(unsafe_code)`. These raw-pointer entry
 //! points live only in this crate, which is outside `src/`.
@@ -61,6 +62,10 @@ pub unsafe extern "C" fn run(mode: u32, a_ptr: *const u8, a_len: usize) -> u64 {
             format!("{head}\n{}", lines.join("\n"))
         }
         1 | 2 => match fixture::compute_report(input, mode == 2, &[]) {
+            Ok(lines) => format!("OK\n{}", lines.join("\n")),
+            Err(e) => format!("ERROR\n{e}"),
+        },
+        3 => match fixture::inspect_report(input) {
             Ok(lines) => format!("OK\n{}", lines.join("\n")),
             Err(e) => format!("ERROR\n{e}"),
         },
