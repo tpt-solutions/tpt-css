@@ -525,8 +525,8 @@ engineering measurements, not claims about other machines (spec 21.1).
     both a typo and a valid but unsupported name. Vendor-prefixed names are reported
     the same way.
 
-37. **Pass-through values.** `box-shadow`, `transform`, `transition`, `flex`, and
-    `grid` are registered with `Grammar::PassThrough`: any valid component values
+37. **Pass-through values.** `transition`, `flex`, and `grid` are registered with
+    `Grammar::PassThrough` (`box-shadow` and `transform` were, until decision 51 typed them): any valid component values
     are accepted and stored as canonical text (`Value::Raw`, `values/raw.rs`).
     Canonical means whitespace collapsed, whitespace trimmed inside functions, and
     strings in double quotes. Numbers are reformatted, so `0.50` reads as `0.5`. A
@@ -644,25 +644,118 @@ engineering measurements, not claims about other machines (spec 21.1).
     includes user-agent declarations. Tests: `tests/cli.rs`. The playground build
     was smoke-tested in Node.
 
+51. **Typed time, angle, `box-shadow`, and `transform` values.** Four new value
+    kinds: `Time` (`s` and `ms`), `Angle` (`deg`, `grad`, `rad`, and `turn`), `List`
+    (a comma-separated list of one type), `Shadows`, and `Transforms`. Computed
+    values are canonical: times in seconds, angles in degrees, lengths in px.
+    `transition-duration`, `transition-delay`, `animation-duration`, and
+    `animation-delay` are registered at ids 97 to 100 and take lists. Durations
+    reject negative times, and delays accept them. Their initial value is one zero
+    time. `box-shadow` takes `none` or a list of shadows. Each shadow has an optional
+    `inset`, two to four lengths (offsets, then blur, then spread), and an optional
+    color. Its lengths must be contiguous, and a blur cannot be negative. This is
+    stricter than the spec: percentages and `calc()` are rejected in shadow lengths.
+    `currentcolor` becomes the element's color at computed time. `transform` takes
+    `none` or a list of functions. Each function is checked against its own argument
+    kinds and counts (`matrix` takes six numbers, `rotate` one angle, and so on).
+    Tests: `tests/style/typed.rs`. The support table is regenerated.
+
+52. **Environment changes restyle only what they reach.** A rule's declarations read
+    the environment only through the viewport (`vw`, `vh`, `vmin`, `vmax`, and the
+    container units, which fall back to the viewport), the root font size (`em`,
+    `rem`, and percentages), and the color scheme (`light-dark()`). A `calc()`, a
+    pass-through value, or a `var()` counts as reading all three. Media queries also
+    matter. `StyleResolver::mark_env_change` compares the active rules before and
+    after the change. A rule that stopped or started to hold, or that reads a changed
+    input, marks the elements it selects. `restyle` recomputes those and their
+    subtrees, with the usual equality cutoff. A full resolve is still used for shadow
+    trees and for rules with `@container` conditions. The randomized test
+    `environment_changes_match_a_full_resolve` checks the local result against a full
+    resolve over random rules and environments.
+
+53. **`color-mix()` in `display-p3`.** The two colors are converted to Display P3 and
+    mixed in its gamma-encoded values, as the sRGB path mixes its own. The result is
+    converted back to sRGB and clipped, because the output type is sRGB. A color
+    outside sRGB therefore comes out clipped, not as a wide-gamut value. Neutral
+    grays stay neutral. The round trip of each color with itself is tested in
+    `tests/style/m3.rs`.
+
+54. **Dependency graphs are not built.** A selector dependency graph and a custom
+    property dependency graph would both refine the restyle. Neither is built. The
+    selector side is already covered by the `structural` and `needs_ancestors` flags,
+    which decide how wide a restyle must be. Custom properties are inherited, so a
+    change alters every descendant's custom map. The equality cutoff already stops the
+    restyle where computed styles end up unchanged, and a graph from property to reader
+    would not remove that work. Revisit if a profile shows custom-property-heavy trees
+    are slow.
+
+55. **No `RestyleHint` type.** The spec's hint (self, descendants, later siblings) is
+    what the existing `StyleChange` variants, the dirty set, and the structural flag
+    express. A separate type would repeat them without changing a result.
+
+56. **`:has()` and container invalidation stay conservative.** A `:has()` rule can
+    depend on any descendant, and a container change can reach any element that
+    queries it. A finer restyle would recompute an ancestor without its subtree, and the
+    cutoff does not allow that for rules that are not subject-only. Container providers
+    still restyle everything. Environment changes are narrowed (decision 52).
+
+57. **Style sharing across parents and for pseudo-elements is deferred.** Sharing
+    stays within one parent, and pseudo-element styles are not shared. The design asks
+    for a Linux profile first, which this environment cannot produce. Sharing across
+    parents would need the parent's computed style in the key, which costs as much as
+    the work it saves unless the profile says otherwise.
+
+58. **Wide-gamut spaces.** `WideSpace` covers `display-p3`, `rec2020`, `a98-rgb`, and
+    `prophoto-rgb`, for `color-mix()` and for `color()`. Each has its own matrix to
+    XYZ and its transfer function. The matrices were derived from the primaries and
+    white points, and they match the published values. ProPhoto uses D50, so it goes
+    through the D50 path. `color()` clips to sRGB, as `color-mix()` does. Tests check
+    that each space round-trips with itself, that neutral grays stay neutral, and that
+    white maps to white.
+
+59. **`font-variant` longhands.** `font-variant-ligatures`, `-numeric`, `-east-asian`,
+    `-position`, `-emoji`, and `-alternates` are registered at ids 101 to 106. The
+    keyword lists use a `KeywordSet` grammar, which keeps the keywords in canonical
+    order, rejects repeats, and enforces mutually exclusive groups. `normal` and `none`
+    stand alone. `font-variant-alternates` is stored as canonical text, like
+    `background-image`. The `font-variant` shorthand gives each keyword to the longhand
+    that accepts it. `font-variant: none` follows the spec: ligatures become `none`, and
+    the rest become `normal`. The `font` shorthand resets all six longhands.
+
+60. **Fuzz bodies as a seeded smoke test.** libFuzzer needs nightly and Linux, and
+    this environment has neither. The bodies of the six targets run in
+    `the_fuzz_target_bodies_do_not_panic_on_seeded_inputs` on stable Rust, with raw
+    bytes and a CSS token alphabet that includes the new parsers. It is not
+    coverage-guided, but it runs everywhere. The libFuzzer job is unchanged, and its
+    result on a Linux runner is still unconfirmed.
+
+61. **Initial values round-trip.** A test checks that every registered property's
+    initial value serializes to text that its own grammar parses back to the same
+    value. That is the property a host relies on when it writes an initial value as
+    text.
+
 ### Still open
 
 - Scope proximity is implemented (decision 12). The order matches the Cascade 6 draft. `spec.txt` 13.3 was corrected in a39110c.
-- Color spaces beyond the ones in decision 19 and XYZ (`display-p3` and the others).
+- Color spaces outside CSS Color 4 (for example `jzazbz`). The RGB spaces of Color 4 are all in `color-mix()` and `color()` (decisions 53 and 58).
 - `StyleChange::AttributeChanged` (no name) is still conservative. Use
   `AttributeNamed` to skip attributes that no selector reads.
 - Container units across nested containers: only the nearest size container is used.
 - Shadow DOM: shadow trees built by
   the engine itself (decision 27 leaves them to the host).
-- Style sharing, a dependency graph for custom properties, and a dependency index
-  for selectors (the cutoff and the conservative rules are the current approach).
+- Style sharing across parents and for pseudo-elements (decision 57), a dependency
+  graph for custom properties and for selectors (decision 54), and a finer `:has()`
+  and container invalidation (decision 56). The cutoff and the conservative rules
+  are the current approach.
 - Fuzz targets and coverage-guided fuzzing. The randomized tests are seeded and
   deterministic, which is not the same thing.
 - The WPT subsuites are out of scope (decision 33).
 - Calc depth: the configured `max_calc_depth` is the effective limit (decision 13). The value parser recurses up to 256, the default component nesting limit.
 - Long-tail properties still missing: typed grammars for `transition`, `flex`,
-  `grid`, `box-shadow`, and `transform` (they are pass-through text, decision 37),
-  and angle, time, and resolution values. `border-radius` is done, including the
-  elliptical form (`Value::Elliptical`).
+  `grid`, and `filter` (they are pass-through text, decision 37), and resolution
+  values. `box-shadow`, `transform`, the time properties, and angles are typed
+  (decision 51). `border-radius` is done, including the elliptical form
+  (`Value::Elliptical`).
 - Full resolve grew by roughly 35 to 60 percent in the runs here when the registry went from 50 to 80
   properties, because every element computes every registered property. The
   timings in this section were taken on a machine that varied between runs.

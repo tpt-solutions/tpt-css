@@ -2,7 +2,7 @@
 
 # Property support
 
-97 properties are registered. A registered property is parsed and computed. Pass-through properties keep their value as text. Properties that are not registered are reported as `info` diagnostics and ignored.
+107 properties are registered. A registered property is parsed and computed. Pass-through properties keep their value as text. Properties that are not registered are reported as `info` diagnostics and ignored.
 
 | Property | Grammar | Inherited | Initial | Spec |
 | --- | --- | --- | --- | --- |
@@ -94,8 +94,8 @@
 | `text-decoration-skip-ink` | keywords | no | `auto` | [link](https://www.w3.org/TR/css-text-decor-3/) |
 | `font-stretch` | font-stretch | yes | `normal` | [link](https://www.w3.org/TR/css-fonts-4/) |
 | `font-variant-caps` | keywords | yes | `normal` | [link](https://www.w3.org/TR/css-fonts-4/) |
-| `box-shadow` | pass-through (text) | no | `none` | [link](https://www.w3.org/TR/css-backgrounds-3/) |
-| `transform` | pass-through (text) | no | `none` | [link](https://www.w3.org/TR/css-transforms-2/) |
+| `box-shadow` | shadow-list | no | `none` | [link](https://www.w3.org/TR/css-backgrounds-3/) |
+| `transform` | transform-list | no | `none` | [link](https://www.w3.org/TR/css-transforms-2/) |
 | `transition` | pass-through (text) | no | `all 0s ease 0s` | [link](https://www.w3.org/TR/css-transitions-1/) |
 | `flex` | pass-through (text) | no | `0 1 auto` | [link](https://www.w3.org/TR/css-flexbox-1/) |
 | `grid` | pass-through (text) | no | `none` | [link](https://www.w3.org/TR/css-grid-2/) |
@@ -103,6 +103,16 @@
 | `counter-reset` | counters | no | `none` | [link](https://www.w3.org/TR/css-lists-3/) |
 | `counter-increment` | counters | no | `none` | [link](https://www.w3.org/TR/css-lists-3/) |
 | `counter-set` | counters | no | `none` | [link](https://www.w3.org/TR/css-lists-3/) |
+| `transition-duration` | time-list | no | `0s` | [link](https://www.w3.org/TR/css-transitions-1/) |
+| `transition-delay` | time-list | no | `0s` | [link](https://www.w3.org/TR/css-transitions-1/) |
+| `animation-duration` | time-list | no | `0s` | [link](https://www.w3.org/TR/css-animations-1/) |
+| `animation-delay` | time-list | no | `0s` | [link](https://www.w3.org/TR/css-animations-1/) |
+| `font-variant-ligatures` | keyword-set | yes | `normal` | [link](https://www.w3.org/TR/css-fonts-4/) |
+| `font-variant-numeric` | keyword-set | yes | `normal` | [link](https://www.w3.org/TR/css-fonts-4/) |
+| `font-variant-east-asian` | keyword-set | yes | `normal` | [link](https://www.w3.org/TR/css-fonts-4/) |
+| `font-variant-position` | keywords | yes | `normal` | [link](https://www.w3.org/TR/css-fonts-4/) |
+| `font-variant-emoji` | keywords | yes | `normal` | [link](https://www.w3.org/TR/css-fonts-4/) |
+| `font-variant-alternates` | font-variant-alternates | yes | `normal` | [link](https://www.w3.org/TR/css-fonts-4/) |
 
 ## Shorthands
 
