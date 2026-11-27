@@ -26,6 +26,13 @@ published (`publish = false` in `Cargo.toml`), so there are no released versions
 - Implicit `list-item` counter for `display: list-item` elements (DESIGN.md 43).
 - `ParseOptions::preserve_comments` and `ParsedStylesheet::comments` (DESIGN.md 44).
 - `:current()`, `:past()`, and `:future()` functional forms (DESIGN.md 45).
+- Media-state pseudo-classes `:muted`, `:buffering`, `:stalled`, `:seeking`, and
+  `:volume-locked` (DESIGN.md 49).
+- `color-mix()` hue methods `increasing` and `decreasing` (DESIGN.md 48).
+- `tpt-css inspect <tree.json>` and the playground's Inspect mode: the winning
+  declaration of each property, with origin, layer, and specificity (DESIGN.md 50).
+- `ResolverConfig::share_styles` (off by default): sibling style sharing (DESIGN.md 35, 46).
+- `:dir()` falls back to `ltr` when no ancestor has a direction (DESIGN.md 47).
 - Test support: a small markup reader (`tests/common/markup.rs`) and an end-to-end
   web test under `--features web` (DESIGN.md 39). Not an engine parser.
 - Counters: `counter-reset`, `counter-set`, `counter-increment`, and the

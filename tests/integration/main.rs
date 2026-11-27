@@ -19,6 +19,7 @@ mod invalidation;
 mod json;
 mod perf;
 mod property;
+mod sharing;
 mod snapshots;
 mod spec_trace;
 mod support;

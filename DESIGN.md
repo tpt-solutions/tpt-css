@@ -479,7 +479,7 @@ engineering measurements, not claims about other machines (spec 21.1).
     call, as before. Measured in DESIGN.md section 8: the growth ratio for 4 times
     the siblings fell from 11.7 to 4.0.
 
-35. **Style sharing: measured split and design (proposed, not built).** Measured
+35. **Style sharing: measured split and design (built, opt-in).** Measured
     in release (`resolve_split_between_computation_and_matching`, 10,000 elements,
     one run on this machine): an empty sheet takes 83 ms, which is the tree walk
     plus computing every property for every element. A real sheet takes 89 ms, so
@@ -613,11 +613,41 @@ engineering measurements, not claims about other machines (spec 21.1).
     in matching, specificity, nesting resolution, invalidation (attribute names and
     the `:has()`, ancestor, and structure flags), and CSSOM serialization.
 
+46. **Style sharing is built and off by default.** `ResolverConfig::share_styles`
+    enables the design above, with one narrowing: the cache is kept per tree parent,
+    so only siblings share, and at most 16 styles per parent are kept. The key is the
+    winning declarations (`Cascaded`, now comparable), the container size, and the
+    attributes when a rule uses `attr()`. Sharing is off when any rule uses counters,
+    and for elements with pseudo-elements or assigned slots. Tests in
+    `tests/integration/sharing.rs` check that results match a resolve without sharing.
+    The speed-up is 102 ms to 71 ms for 10,000 identical siblings in release. The
+    default stays off until the Linux profile (decision 35) confirms the per-property
+    cost is where the time goes.
+
+47. **`:dir()` defaults to `ltr`.** When no node from the element up to the root
+    has a direction (`StyleTree::direction`), the direction is `ltr`, the default
+    for the root in HTML. Before this, `:dir(ltr)` matched nothing unless the host
+    reported a direction. A host that reports directions is unaffected.
+48. **Hue methods `increasing` and `decreasing`.** `color-mix(in <polar space>
+    increasing hue, ...)` always moves the hue up, and `decreasing` always moves it
+    down, so either can take an arc longer than 180 degrees. Equal hues do not move
+    under either. Tests: `tests/style/m3.rs`. Only `display-p3` and the other
+    wide-gamut spaces remain open for `color-mix()`.
+49. **Media-state pseudo-classes.** `:muted`, `:buffering`, `:stalled`, `:seeking`,
+    and `:volume-locked` are state bits 38 to 42 that the host sets, like
+    `:playing` and `:paused`. Nothing sets them by default.
+50. **`tpt-css inspect` and playground mode 3.** `tools/fixture.rs` has
+    `inspect_report`, which lists for each element the winning declaration of each
+    property with its origin, `!important`, layer rank, inline flag, specificity, and
+    source position. The command line runs it as `tpt-css inspect <tree.json>`, and
+    the playground runs it as mode `3` from an "Inspect" button. Unlike `compute`, it
+    includes user-agent declarations. Tests: `tests/cli.rs`. The playground build
+    was smoke-tested in Node.
+
 ### Still open
 
 - Scope proximity is implemented (decision 12). The order matches the Cascade 6 draft. `spec.txt` 13.3 was corrected in a39110c.
-- Color spaces beyond the ones in decision 19 and XYZ (`display-p3` and the others),
-  and the hue methods other than `shorter` and `longer`.
+- Color spaces beyond the ones in decision 19 and XYZ (`display-p3` and the others).
 - `StyleChange::AttributeChanged` (no name) is still conservative. Use
   `AttributeNamed` to skip attributes that no selector reads.
 - Container units across nested containers: only the nearest size container is used.
