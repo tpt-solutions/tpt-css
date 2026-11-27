@@ -40,8 +40,8 @@ The engine was built in milestones named after the specification
 
 ## Known gaps
 
-- Pass-through values for `box-shadow`, `transform`, `transition`, `flex`, and
-  `grid` are not parsed.
+- The `grid` value is not parsed; it is kept as text. `filter` is typed, except that a list naming a `url()` is kept as text. `transition`, `animation`,
+  and `flex` are typed shorthands, and `box-shadow` and `transform` are typed too.
 - A misspelled property name produces no diagnostic. It is ignored silently.
 - The only DOM adapter is test support. The end-to-end web test (`--features web`) reads a small markup subset, not full HTML.
 - The fuzz targets run in CI on Linux, but the job has not been confirmed green

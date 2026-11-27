@@ -188,8 +188,8 @@ pub enum Value {
     /// Counter operations for `counter-reset`, `counter-set`, or
     /// `counter-increment`: each counter name with its integer.
     Counters(Vec<(String, i64)>),
-    /// The canonical text of a pass-through value (`box-shadow`, `transform`,
-    /// `transition`, `flex`, `grid`). This engine does not parse these grammars.
+    /// The canonical text of a pass-through value (`grid`). This engine does not
+    /// parse its grammar.
     Raw(String),
     /// A `light-dark(light, dark)` color pair, resolved at computed-value time
     /// from the color scheme (CSS Color 5).

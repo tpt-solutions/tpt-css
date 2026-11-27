@@ -2,9 +2,8 @@
 // Copyright (c) 2026 TPT Solutions
 
 //! Pass-through values (spec 14.1, 15.2). Some properties are registered only
-//! so that a downstream layout or paint engine can read them: `box-shadow`,
-//! `transform`, `transition`, `flex`, and `grid`. This engine does not parse
-//! their grammar. It keeps their component values as canonical text, so that a
+//! so that a downstream layout or paint engine can read them. Today that is
+//! `grid`. This engine does not parse its grammar. It keeps their component values as canonical text, so that a
 //! host can read the cascaded value and parse it itself.
 //!
 //! The text is canonical, not the author's spelling: whitespace is collapsed to

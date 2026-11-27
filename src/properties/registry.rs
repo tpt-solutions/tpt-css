@@ -95,6 +95,38 @@ pub enum Grammar {
     Shadow,
     /// `transform`: `none`, or one or more transform functions (CSS Transforms 2).
     Transform,
+    /// A number, optionally rejected when negative (`flex-grow`, `flex-shrink`).
+    Number {
+        /// Reject negative values.
+        non_negative: bool,
+    },
+    /// `transition-property`: `none`, or a comma-separated list of `all` and
+    /// property names. Names are stored lowercase; `none` is a one-item list.
+    TransitionProperty,
+    /// A comma-separated list of easing values for `transition-timing-function`
+    /// and `animation-timing-function`: a keyword, `cubic-bezier()`, or
+    /// `steps()` (CSS Easing 1). Functions are stored as canonical text.
+    TimingFunctionList,
+    /// `filter`: `none`, or a space-separated list of filter functions (Filter
+    /// Effects 1). A list that names a `url()` is kept as canonical text.
+    Filter,
+    /// One of the per-layer background longhands: a comma-separated list with one
+    /// item for each layer (CSS Backgrounds 3).
+    BackgroundLayers {
+        /// Which longhand's item grammar applies.
+        kind: LayerKind,
+    },
+    /// A comma-separated list of keywords from `keywords`, one per item.
+    KeywordList {
+        /// The accepted keywords.
+        keywords: &'static [&'static str],
+    },
+    /// `animation-iteration-count`: a comma-separated list of non-negative numbers
+    /// or `infinite`.
+    IterationCountList,
+    /// `animation-name`: `none`, or a comma-separated list of names. Names keep
+    /// their case (keyframe names are case-sensitive).
+    AnimationName,
     /// `font-variant-alternates`: `normal`, or a list of `historical-forms` and the
     /// functions `stylistic()`, `styleset()`, `character-variant()`, `swash()`,
     /// `ornaments()`, and `annotation()`, each at most once. Stored as canonical
@@ -109,6 +141,23 @@ pub enum Grammar {
         /// Groups of keywords of which at most one may appear.
         exclusive: &'static [&'static [&'static str]],
     },
+}
+
+/// The item grammar of a background layer longhand (CSS Backgrounds 3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayerKind {
+    /// `background-position`: one to four values, keywords, offsets, or both.
+    Position,
+    /// `background-size`: `auto`, `cover`, `contain`, or one or two sizes.
+    Size,
+    /// `background-repeat`: one keyword, or two of `repeat`, `space`, `round`, and
+    /// `no-repeat`.
+    Repeat,
+    /// `background-attachment`: `scroll`, `fixed`, or `local`.
+    Attachment,
+    /// `background-origin` and `background-clip`: `border-box`, `padding-box`, or
+    /// `content-box`.
+    Box,
 }
 
 /// The initial value (spec 15.1 `initial`). A small enum so the table is
@@ -133,6 +182,12 @@ pub enum Initial {
     Raw(&'static str),
     /// A list holding one time, in seconds.
     Seconds(f64),
+    /// A list of keywords, one item each.
+    KeywordList(&'static [&'static str]),
+    /// A list holding one unitless number.
+    NumberList(f64),
+    /// A list holding one item of canonical text.
+    RawList(&'static str),
 }
 
 impl Initial {
@@ -151,6 +206,11 @@ impl Initial {
                 value: s,
                 unit: crate::values::TimeUnit::S,
             }]),
+            Initial::KeywordList(keywords) => {
+                Value::List(keywords.iter().map(|k| Value::Keyword(k)).collect())
+            }
+            Initial::NumberList(n) => Value::List(vec![Value::Number(n)]),
+            Initial::RawList(text) => Value::List(vec![Value::Raw(text.to_string())]),
         }
     }
 }
@@ -179,6 +239,7 @@ const CSS_TRANSITIONS: &str = "https://www.w3.org/TR/css-transitions-1/";
 const CSS_ANIMATIONS: &str = "https://www.w3.org/TR/css-animations-1/";
 const CSS_FLEXBOX: &str = "https://www.w3.org/TR/css-flexbox-1/";
 const CSS_GRID: &str = "https://www.w3.org/TR/css-grid-2/";
+const CSS_FILTER_EFFECTS: &str = "https://www.w3.org/TR/filter-effects-1/";
 const CSS_COLOR: &str = "https://www.w3.org/TR/css-color-4/";
 const CSS_SIZING: &str = "https://www.w3.org/TR/css-sizing-3/";
 
@@ -1090,20 +1151,20 @@ pub const PROPERTIES: &[PropertySpec] = &[
         grammar: Grammar::Transform,
         spec_url: CSS_TRANSFORMS,
     },
-    // 90
+    // 90. Longhand of the `transition` shorthand (CSS Transitions 1).
     PropertySpec {
-        name: "transition",
+        name: "transition-property",
         inherited: false,
-        initial: Initial::Raw("all 0s ease 0s"),
-        grammar: Grammar::PassThrough,
+        initial: Initial::KeywordList(&["all"]),
+        grammar: Grammar::TransitionProperty,
         spec_url: CSS_TRANSITIONS,
     },
-    // 91
+    // 91. Longhand of the `flex` shorthand (CSS Flexbox 1).
     PropertySpec {
-        name: "flex",
+        name: "flex-grow",
         inherited: false,
-        initial: Initial::Raw("0 1 auto"),
-        grammar: Grammar::PassThrough,
+        initial: Initial::Number(0.0),
+        grammar: Grammar::Number { non_negative: true },
         spec_url: CSS_FLEXBOX,
     },
     // 92
@@ -1238,6 +1299,143 @@ pub const PROPERTIES: &[PropertySpec] = &[
         initial: Initial::Keyword("normal"),
         grammar: Grammar::Alternates,
         spec_url: CSS_FONTS,
+    },
+    // 106-108. The rest of the `flex` and `transition` longhands.
+    PropertySpec {
+        name: "flex-shrink",
+        inherited: false,
+        initial: Initial::Number(1.0),
+        grammar: Grammar::Number { non_negative: true },
+        spec_url: CSS_FLEXBOX,
+    },
+    PropertySpec {
+        name: "flex-basis",
+        inherited: false,
+        initial: Initial::Keyword("auto"),
+        grammar: Grammar::LengthPercentage {
+            non_negative: true,
+            keywords: &["auto", "content"],
+        },
+        spec_url: CSS_FLEXBOX,
+    },
+    PropertySpec {
+        name: "transition-timing-function",
+        inherited: false,
+        initial: Initial::KeywordList(&["ease"]),
+        grammar: Grammar::TimingFunctionList,
+        spec_url: CSS_TRANSITIONS,
+    },
+    // 109-114. Longhands of the `animation` shorthand (CSS Animations 1).
+    PropertySpec {
+        name: "animation-name",
+        inherited: false,
+        initial: Initial::KeywordList(&["none"]),
+        grammar: Grammar::AnimationName,
+        spec_url: CSS_ANIMATIONS,
+    },
+    PropertySpec {
+        name: "animation-timing-function",
+        inherited: false,
+        initial: Initial::KeywordList(&["ease"]),
+        grammar: Grammar::TimingFunctionList,
+        spec_url: CSS_ANIMATIONS,
+    },
+    PropertySpec {
+        name: "animation-iteration-count",
+        inherited: false,
+        initial: Initial::NumberList(1.0),
+        grammar: Grammar::IterationCountList,
+        spec_url: CSS_ANIMATIONS,
+    },
+    PropertySpec {
+        name: "animation-direction",
+        inherited: false,
+        initial: Initial::KeywordList(&["normal"]),
+        grammar: Grammar::KeywordList {
+            keywords: &["normal", "reverse", "alternate", "alternate-reverse"],
+        },
+        spec_url: CSS_ANIMATIONS,
+    },
+    PropertySpec {
+        name: "animation-fill-mode",
+        inherited: false,
+        initial: Initial::KeywordList(&["none"]),
+        grammar: Grammar::KeywordList {
+            keywords: &["none", "forwards", "backwards", "both"],
+        },
+        spec_url: CSS_ANIMATIONS,
+    },
+    PropertySpec {
+        name: "animation-play-state",
+        inherited: false,
+        initial: Initial::KeywordList(&["running"]),
+        grammar: Grammar::KeywordList {
+            keywords: &["running", "paused"],
+        },
+        spec_url: CSS_ANIMATIONS,
+    },
+    // 116. Filter functions (Filter Effects 1). Not inherited.
+    PropertySpec {
+        name: "filter",
+        inherited: false,
+        initial: Initial::Keyword("none"),
+        grammar: Grammar::Filter,
+        spec_url: CSS_FILTER_EFFECTS,
+    },
+    // 117-122. Per-layer background longhands (CSS Backgrounds 3). Not inherited.
+    PropertySpec {
+        name: "background-position",
+        inherited: false,
+        initial: Initial::RawList("0% 0%"),
+        grammar: Grammar::BackgroundLayers {
+            kind: LayerKind::Position,
+        },
+        spec_url: CSS_BACKGROUNDS,
+    },
+    PropertySpec {
+        name: "background-size",
+        inherited: false,
+        initial: Initial::KeywordList(&["auto"]),
+        grammar: Grammar::BackgroundLayers {
+            kind: LayerKind::Size,
+        },
+        spec_url: CSS_BACKGROUNDS,
+    },
+    PropertySpec {
+        name: "background-repeat",
+        inherited: false,
+        initial: Initial::KeywordList(&["repeat"]),
+        grammar: Grammar::BackgroundLayers {
+            kind: LayerKind::Repeat,
+        },
+        spec_url: CSS_BACKGROUNDS,
+    },
+    PropertySpec {
+        name: "background-attachment",
+        inherited: false,
+        initial: Initial::KeywordList(&["scroll"]),
+        grammar: Grammar::BackgroundLayers {
+            kind: LayerKind::Attachment,
+        },
+        spec_url: CSS_BACKGROUNDS,
+    },
+    PropertySpec {
+        name: "background-origin",
+        inherited: false,
+        initial: Initial::KeywordList(&["padding-box"]),
+        grammar: Grammar::BackgroundLayers {
+            kind: LayerKind::Box,
+        },
+        spec_url: CSS_BACKGROUNDS,
+    },
+    PropertySpec {
+        name: "background-clip",
+        inherited: false,
+        initial: Initial::KeywordList(&["border-box"]),
+        grammar: Grammar::BackgroundLayers {
+            kind: LayerKind::Box,
+        },
+        spec_url: CSS_BACKGROUNDS,
     },
 ];
 

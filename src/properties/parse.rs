@@ -8,7 +8,7 @@
 //! do not match the grammar. Values that contain `var()` are not parsed here:
 //! the style layer substitutes them first and parses the result later.
 
-use super::registry::{Grammar, PropertySpec, FONT_STRETCH_KEYWORDS};
+use super::registry::{Grammar, LayerKind, PropertySpec, FONT_STRETCH_KEYWORDS};
 use crate::syntax::{trim_whitespace, ComponentValue, NumericType, TokenKind};
 use crate::values::color::parse_color;
 use crate::values::length::parse_length_percentage;
@@ -121,6 +121,16 @@ pub fn parse_property_value(
         Grammar::TimeList { non_negative } => parse_time_list(values, non_negative),
         Grammar::Shadow => parse_shadow_list(values),
         Grammar::Transform => parse_transform_list(values),
+        Grammar::Filter => parse_filter_list(values),
+        Grammar::BackgroundLayers { kind } => parse_background_layers(values, kind),
+        Grammar::Number { non_negative } => {
+            number(values, |v| !non_negative || v >= 0.0).map(Value::Number)
+        }
+        Grammar::TransitionProperty => parse_transition_property(values),
+        Grammar::TimingFunctionList => parse_timing_function_list(values),
+        Grammar::KeywordList { keywords } => parse_keyword_list(values, keywords),
+        Grammar::IterationCountList => parse_iteration_count_list(values),
+        Grammar::AnimationName => parse_animation_name(values),
         Grammar::Alternates => parse_alternates(values),
         Grammar::KeywordSet {
             keywords,
@@ -802,6 +812,447 @@ fn parse_transform_list(values: &[ComponentValue]) -> Option<Value> {
         functions.push(TransformFunction { name, args });
     }
     (!functions.is_empty()).then_some(Value::Transforms(functions))
+}
+
+/// The filter functions whose amount is a non-negative number or percentage. An
+/// omitted amount is 1 (Filter Effects 1 section 10).
+const FILTER_AMOUNT_FUNCTIONS: &[&str] = &[
+    "brightness",
+    "contrast",
+    "grayscale",
+    "invert",
+    "opacity",
+    "saturate",
+    "sepia",
+];
+
+/// The whitespace-separated parts of a value. Functions are single parts.
+fn space_parts(values: &[ComponentValue]) -> Vec<&[ComponentValue]> {
+    values
+        .split(|v| v.is_whitespace())
+        .filter(|part| !part.is_empty())
+        .collect()
+}
+
+/// `filter`: `none`, or one or more filter functions separated by spaces (Filter
+/// Effects 1 section 10). A list that names a `url()` is kept as its canonical
+/// text, because a reference is not resolved here.
+fn parse_filter_list(values: &[ComponentValue]) -> Option<Value> {
+    if keyword(values, &["none"]).is_some() {
+        return Some(Value::Keyword("none"));
+    }
+    let parts = space_parts(values);
+    if parts.is_empty() {
+        return None;
+    }
+    let mut functions = Vec::new();
+    let mut has_url = false;
+    for part in parts {
+        match trim_whitespace(part) {
+            [ComponentValue::Token(t)] if matches!(t.kind, TokenKind::Url(_)) => has_url = true,
+            [ComponentValue::Function(f)] => functions.push(filter_function(f)?),
+            _ => return None,
+        }
+    }
+    if has_url {
+        return Some(Value::Raw(crate::values::raw::serialize_components(values)));
+    }
+    Some(Value::Transforms(functions))
+}
+
+/// One filter function with its arguments, or its defaults when they are omitted.
+fn filter_function(f: &crate::syntax::Function) -> Option<TransformFunction> {
+    let args = trim_whitespace(&f.value);
+    let name = f.name.to_ascii_lowercase();
+    if name == "blur" {
+        let blur = if args.is_empty() {
+            Value::px(0.0)
+        } else {
+            let length = parse_length_percentage(args, true, true)?;
+            if !matches!(length, Value::Length { .. }) {
+                return None;
+            }
+            length
+        };
+        return Some(TransformFunction {
+            name: "blur",
+            args: vec![blur],
+        });
+    }
+    if let Some(&name) = FILTER_AMOUNT_FUNCTIONS.iter().find(|n| **n == name) {
+        let amount = if args.is_empty() {
+            1.0
+        } else {
+            number_or_percent(args).filter(|v| *v >= 0.0)?
+        };
+        return Some(TransformFunction {
+            name,
+            args: vec![Value::Number(amount)],
+        });
+    }
+    if name == "hue-rotate" {
+        let angle = if args.is_empty() {
+            Value::Angle {
+                value: 0.0,
+                unit: AngleUnit::Deg,
+            }
+        } else {
+            parse_angle(args)?
+        };
+        return Some(TransformFunction {
+            name: "hue-rotate",
+            args: vec![angle],
+        });
+    }
+    if name == "drop-shadow" {
+        return drop_shadow(&f.value).map(|args| TransformFunction {
+            name: "drop-shadow",
+            args,
+        });
+    }
+    None
+}
+
+/// `drop-shadow()`: two lengths for the offsets, an optional third for the blur
+/// (never negative), and an optional color, in any position among the parts.
+/// The result is the offsets, the blur if given, and the color if given.
+fn drop_shadow(values: &[ComponentValue]) -> Option<Vec<Value>> {
+    let mut lengths = Vec::new();
+    let mut color = None;
+    for part in space_parts(values) {
+        if let Some(c) = parse_color(part) {
+            if color.replace(Value::Color(c)).is_some() {
+                return None;
+            }
+        } else {
+            let length = parse_length_percentage(part, false, true)?;
+            if !matches!(length, Value::Length { .. }) {
+                return None;
+            }
+            lengths.push(length);
+        }
+    }
+    if !(2..=3).contains(&lengths.len()) {
+        return None;
+    }
+    if let Some(Value::Length { value, .. }) = lengths.get(2) {
+        if *value < 0.0 {
+            return None;
+        }
+    }
+    let mut args = lengths;
+    args.extend(color);
+    Some(args)
+}
+
+/// A background longhand: a comma-separated list with one item for each layer.
+fn parse_background_layers(values: &[ComponentValue], kind: LayerKind) -> Option<Value> {
+    comma_parts(values)
+        .into_iter()
+        .map(|layer| background_layer_item(layer, kind))
+        .collect::<Option<Vec<_>>>()
+        .map(Value::List)
+}
+
+/// One layer's item for a background longhand (CSS Backgrounds 3). Items that
+/// are forms of several words are kept as their canonical text.
+pub(crate) fn background_layer_item(layer: &[ComponentValue], kind: LayerKind) -> Option<Value> {
+    let parts = space_parts(layer);
+    if parts.is_empty() {
+        return None;
+    }
+    match kind {
+        LayerKind::Position => valid_position(&parts).then(|| words_text(&parts)),
+        LayerKind::Size => size_item(&parts),
+        LayerKind::Repeat => repeat_item(&parts),
+        LayerKind::Attachment => single_keyword(&parts, &["scroll", "fixed", "local"]),
+        LayerKind::Box => single_keyword(&parts, &["padding-box", "border-box", "content-box"]),
+    }
+}
+
+/// The canonical text of a sequence of words, separated by single spaces.
+fn words_text(parts: &[&[ComponentValue]]) -> Value {
+    Value::Raw(
+        parts
+            .iter()
+            .map(|part| crate::values::raw::serialize_components(part))
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
+}
+
+fn single_keyword(parts: &[&[ComponentValue]], list: &'static [&'static str]) -> Option<Value> {
+    match parts {
+        [part] => keyword(part, list),
+        _ => None,
+    }
+}
+
+/// A keyword of `background-position` that names one side or the middle.
+fn position_keyword(part: &[ComponentValue]) -> Option<&'static str> {
+    match keyword(part, &["left", "center", "right", "top", "bottom"])? {
+        Value::Keyword(k) => Some(k),
+        _ => None,
+    }
+}
+
+fn is_offset(part: &[ComponentValue]) -> bool {
+    parse_length_percentage(part, false, true).is_some()
+}
+
+fn is_horizontal(k: &str) -> bool {
+    k == "left" || k == "right"
+}
+
+fn is_vertical(k: &str) -> bool {
+    k == "top" || k == "bottom"
+}
+
+/// `background-position`: one to four values (CSS Backgrounds 3 section 3.6). One
+/// or two values are keywords or offsets, with the axes in order unless both are
+/// keywords. Three or four values are edge keywords, each with an optional offset
+/// after it, for two different axes.
+fn valid_position(parts: &[&[ComponentValue]]) -> bool {
+    match parts {
+        [a] => position_keyword(a).is_some() || is_offset(a),
+        [a, b] => match (position_keyword(a), position_keyword(b)) {
+            (Some(x), Some(y)) => {
+                !(is_horizontal(x) && is_horizontal(y)) && !(is_vertical(x) && is_vertical(y))
+            }
+            (Some(x), None) => is_offset(b) && !is_vertical(x),
+            (None, Some(y)) => is_offset(a) && !is_horizontal(y),
+            (None, None) => is_offset(a) && is_offset(b),
+        },
+        _ => edge_position(parts),
+    }
+}
+
+/// The edge form of `background-position`: two edge keywords on different axes,
+/// each with an optional offset after it.
+fn edge_position(parts: &[&[ComponentValue]]) -> bool {
+    let mut edges: Vec<&str> = Vec::new();
+    let mut i = 0;
+    while i < parts.len() {
+        let Some(edge) = keyword(parts[i], &["left", "right", "top", "bottom"]) else {
+            return false;
+        };
+        let Value::Keyword(edge) = edge else {
+            return false;
+        };
+        edges.push(edge);
+        i += 1;
+        if i < parts.len() && is_offset(parts[i]) {
+            i += 1;
+        }
+    }
+    matches!(edges.as_slice(), [a, b] if is_horizontal(a) != is_horizontal(b))
+}
+
+/// `background-size`: `auto`, `cover`, or `contain` alone, or one or two
+/// non-negative sizes, where `auto` is allowed (CSS Backgrounds 3 section 3.9).
+fn size_item(parts: &[&[ComponentValue]]) -> Option<Value> {
+    let is_size = |part: &[ComponentValue]| {
+        keyword(part, &["auto"]).is_some() || parse_length_percentage(part, true, true).is_some()
+    };
+    match parts {
+        [part] => keyword(part, &["auto", "cover", "contain"])
+            .or_else(|| is_size(part).then(|| words_text(parts))),
+        [a, b] => (is_size(a) && is_size(b)).then(|| words_text(parts)),
+        _ => None,
+    }
+}
+
+/// `background-repeat`: one keyword, or two of `repeat`, `space`, `round`, and
+/// `no-repeat` (CSS Backgrounds 3 section 3.7).
+fn repeat_item(parts: &[&[ComponentValue]]) -> Option<Value> {
+    let pair_word = |part: &[ComponentValue]| {
+        keyword(part, &["repeat", "space", "round", "no-repeat"]).is_some()
+    };
+    match parts {
+        [part] => keyword(
+            part,
+            &[
+                "repeat-x",
+                "repeat-y",
+                "repeat",
+                "space",
+                "round",
+                "no-repeat",
+            ],
+        ),
+        [a, b] => (pair_word(a) && pair_word(b)).then(|| words_text(parts)),
+        _ => None,
+    }
+}
+
+/// Identifiers that cannot name a transitioned property (CSS-wide keywords and
+/// `default`, plus `none`, which has its own meaning).
+fn is_reserved_property_name(name: &str) -> bool {
+    matches!(
+        name,
+        "none" | "initial" | "inherit" | "unset" | "default" | "revert" | "revert-layer"
+    )
+}
+
+/// `transition-property`: `none`, or a comma-separated list of `all` and property
+/// names (CSS Transitions 1 section 2). Always a list, so one name and several
+/// names have the same shape. Names are lowercase.
+fn parse_transition_property(values: &[ComponentValue]) -> Option<Value> {
+    if keyword(values, &["none"]).is_some() {
+        return Some(Value::List(vec![Value::Keyword("none")]));
+    }
+    comma_parts(values)
+        .into_iter()
+        .map(parse_transition_property_name)
+        .collect::<Option<Vec<_>>>()
+        .map(Value::List)
+}
+
+/// One item of `transition-property`: `all` or a custom ident.
+fn parse_transition_property_name(values: &[ComponentValue]) -> Option<Value> {
+    let [ComponentValue::Token(t)] = trim_whitespace(values) else {
+        return None;
+    };
+    let TokenKind::Ident(name) = &t.kind else {
+        return None;
+    };
+    let name = name.to_ascii_lowercase();
+    if name == "all" {
+        return Some(Value::Keyword("all"));
+    }
+    if is_reserved_property_name(&name) {
+        return None;
+    }
+    Some(Value::Raw(name))
+}
+
+/// The easing keywords (CSS Easing 1).
+const EASING_KEYWORDS: &[&str] = &[
+    "ease",
+    "linear",
+    "ease-in",
+    "ease-out",
+    "ease-in-out",
+    "step-start",
+    "step-end",
+];
+
+/// The `steps()` position keywords (CSS Easing 1 section 2.2).
+const STEP_POSITIONS: &[&str] = &[
+    "start",
+    "end",
+    "jump-start",
+    "jump-end",
+    "jump-none",
+    "jump-both",
+];
+
+/// `transition-timing-function`: a comma-separated list of easing values. Each is
+/// a keyword, `cubic-bezier()`, or `steps()`, and the result is always a list.
+fn parse_timing_function_list(values: &[ComponentValue]) -> Option<Value> {
+    comma_parts(values)
+        .into_iter()
+        .map(parse_easing)
+        .collect::<Option<Vec<_>>>()
+        .map(Value::List)
+}
+
+/// One easing value. The functions are checked and kept as canonical text.
+fn parse_easing(values: &[ComponentValue]) -> Option<Value> {
+    if let Some(k) = keyword(values, EASING_KEYWORDS) {
+        return Some(k);
+    }
+    let [ComponentValue::Function(f)] = trim_whitespace(values) else {
+        return None;
+    };
+    let args = comma_parts(&f.value);
+    let valid = if f.name.eq_ignore_ascii_case("cubic-bezier") {
+        valid_cubic_bezier(&args)
+    } else if f.name.eq_ignore_ascii_case("steps") {
+        valid_steps(&args)
+    } else {
+        false
+    };
+    valid.then(|| Value::Raw(crate::values::raw::serialize_components(values)))
+}
+
+/// A comma-separated list of keywords from `keywords`, one per item.
+fn parse_keyword_list(
+    values: &[ComponentValue],
+    keywords: &'static [&'static str],
+) -> Option<Value> {
+    comma_parts(values)
+        .into_iter()
+        .map(|part| keyword(part, keywords))
+        .collect::<Option<Vec<_>>>()
+        .map(Value::List)
+}
+
+/// `animation-iteration-count`: a comma-separated list of non-negative numbers or
+/// `infinite` (CSS Animations 1 section 3.2).
+fn parse_iteration_count_list(values: &[ComponentValue]) -> Option<Value> {
+    comma_parts(values)
+        .into_iter()
+        .map(|part| {
+            keyword(part, &["infinite"]).or_else(|| number(part, |v| v >= 0.0).map(Value::Number))
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(Value::List)
+}
+
+/// `animation-name`: `none`, or a comma-separated list of names. Names keep their
+/// case, because keyframe names are case-sensitive (CSS Animations 1 section 3.1).
+fn parse_animation_name(values: &[ComponentValue]) -> Option<Value> {
+    if keyword(values, &["none"]).is_some() {
+        return Some(Value::List(vec![Value::Keyword("none")]));
+    }
+    comma_parts(values)
+        .into_iter()
+        .map(|part| {
+            let [ComponentValue::Token(t)] = trim_whitespace(part) else {
+                return None;
+            };
+            let TokenKind::Ident(name) = &t.kind else {
+                return None;
+            };
+            (!is_reserved_property_name(&name.to_ascii_lowercase()))
+                .then(|| Value::Raw(name.clone()))
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(Value::List)
+}
+
+/// `cubic-bezier(x1, y1, x2, y2)`: the x values lie in `[0, 1]` (CSS Easing 1).
+fn valid_cubic_bezier(args: &[&[ComponentValue]]) -> bool {
+    args.len() == 4
+        && number(args[0], |x| (0.0..=1.0).contains(&x)).is_some()
+        && number(args[1], |_| true).is_some()
+        && number(args[2], |x| (0.0..=1.0).contains(&x)).is_some()
+        && number(args[3], |_| true).is_some()
+}
+
+/// `steps(n [, position])`: `n` is a positive integer. `jump-none` needs at least
+/// two steps (CSS Easing 1 section 2.2).
+fn valid_steps(args: &[&[ComponentValue]]) -> bool {
+    let (count, position) = match args {
+        [count] => (count, None),
+        [count, position] => (count, Some(*position)),
+        _ => return false,
+    };
+    let Some(n) = integer(count) else {
+        return false;
+    };
+    if n < 1 {
+        return false;
+    }
+    match position {
+        None => true,
+        Some(position) => match keyword(position, STEP_POSITIONS) {
+            Some(Value::Keyword("jump-none")) => n >= 2,
+            Some(_) => true,
+            None => false,
+        },
+    }
 }
 
 /// The arguments of one transform function, checked against its kinds. It takes

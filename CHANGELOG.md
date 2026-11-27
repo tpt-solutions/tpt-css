@@ -61,6 +61,18 @@ published (`publish = false` in `Cargo.toml`), so there are no released versions
 
 ### Changed
 
+- `background` takes comma-separated layers, with six per-layer longhands
+  (`background-position`, `background-size`, `background-repeat`,
+  `background-attachment`, `background-origin`, `background-clip`) (DESIGN.md 65).
+- Typed `attr()` in any property: units and `type()` syntaxes, with fallbacks, read at
+  computed-value time (DESIGN.md 64).
+- `filter` is a typed property: filter functions with their defaults, and a list
+  that names a `url()` kept as text (DESIGN.md 63).
+- `transition`, `animation`, and `flex` are typed shorthands with typed longhands
+  (`transition-property`, `transition-timing-function`, `animation-name`,
+  `animation-timing-function`, `animation-iteration-count`, `animation-direction`,
+  `animation-fill-mode`, `animation-play-state`, `flex-grow`, `flex-shrink`, and
+  `flex-basis`), not pass-through text (DESIGN.md 62). Only `grid` is pass-through.
 - `font-variant` takes the ligature, numeric, and other sub-values, which made the
   shorthand invalid before. `font-variant: none` now sets ligatures to `none` and the
   rest to `normal`, as the spec says (DESIGN.md 59).

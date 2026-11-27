@@ -37,6 +37,14 @@ fn grammar_name(grammar: Grammar) -> &'static str {
         Grammar::Transform => "transform-list",
         Grammar::KeywordSet { .. } => "keyword-set",
         Grammar::Alternates => "font-variant-alternates",
+        Grammar::Number { .. } => "number",
+        Grammar::TransitionProperty => "transition-property-list",
+        Grammar::TimingFunctionList => "easing-list",
+        Grammar::KeywordList { .. } => "keyword-list",
+        Grammar::IterationCountList => "iteration-count-list",
+        Grammar::AnimationName => "animation-name-list",
+        Grammar::Filter => "filter-list",
+        Grammar::BackgroundLayers { .. } => "background-layer-list",
     }
 }
 

@@ -646,3 +646,386 @@ fn the_fuzz_target_bodies_do_not_panic_on_seeded_inputs() {
         }
     }
 }
+
+#[test]
+fn flex_shorthand_follows_the_factor_and_basis_rules_for_seeded_forms() {
+    // CSS Flexbox 1 section 7.2: `[ grow shrink? || basis ]`. Each form fixes the
+    // three longhands; the generator picks the form and the numbers.
+    use tpt_css::values::Value;
+    let mut rng = Rng(0x5EED_0007);
+    for _ in 0..200 {
+        let g = (rng.next() % 6) as f64;
+        let s = (rng.next() % 6) as f64;
+        let b = (rng.next() % 40) as f64;
+        let (text, grow, shrink, basis) = match rng.next() % 5 {
+            0 => (format!("{g}"), g, 1.0, Value::Percentage(0.0)),
+            1 => (format!("{g} {s}"), g, s, Value::Percentage(0.0)),
+            2 => (format!("{g} {s} {b}px"), g, s, Value::px(b)),
+            3 => (format!("{g} {b}px"), g, 1.0, Value::px(b)),
+            _ => (format!("{b}px"), 1.0, 1.0, Value::px(b)),
+        };
+        let css = format!("child {{ flex: {text} }}");
+        assert_eq!(
+            px_of(&css, "flex-grow"),
+            Value::Number(grow),
+            "flex: {text}"
+        );
+        assert_eq!(
+            px_of(&css, "flex-shrink"),
+            Value::Number(shrink),
+            "flex: {text}"
+        );
+        assert_eq!(px_of(&css, "flex-basis"), basis, "flex: {text}");
+    }
+}
+
+#[test]
+fn transition_layers_keep_their_order_and_defaults_for_seeded_layers() {
+    // Each layer is `[property] [duration [easing] [delay]]`, where a delay needs
+    // a duration. Omitted parts take their initial values. The lists keep the
+    // layer order.
+    use tpt_css::values::{TimeUnit, Value};
+    const PROPS: &[&str] = &["opacity", "transform", "color", "all"];
+    const EASINGS: &[&str] = &["ease", "linear", "ease-in", "ease-out", "ease-in-out"];
+    let mut rng = Rng(0x5EED_0008);
+    for _ in 0..200 {
+        let layers = 1 + (rng.next() % 3) as usize;
+        let (mut text, mut props, mut durations, mut easings, mut delays) =
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        for _ in 0..layers {
+            let mut parts = Vec::new();
+            let prop = (rng.next() % 2 == 0).then(|| rng.pick(PROPS));
+            if let Some(p) = prop {
+                parts.push(p.to_string());
+            }
+            props.push(match prop {
+                Some(p) if p != "all" => Value::Raw(p.to_string()),
+                _ => Value::Keyword("all"),
+            });
+            let duration = (rng.next() % 2 == 0).then(|| 1 + rng.next() % 5);
+            match duration {
+                Some(d) => {
+                    parts.push(format!("{d}s"));
+                    durations.push(Value::Time {
+                        value: d as f64,
+                        unit: TimeUnit::S,
+                    });
+                }
+                None => durations.push(Value::Time {
+                    value: 0.0,
+                    unit: TimeUnit::S,
+                }),
+            }
+            let easing = (rng.next() % 2 == 0).then(|| rng.pick(EASINGS));
+            if let Some(e) = easing {
+                parts.push(e.to_string());
+            }
+            easings.push(Value::Keyword(easing.unwrap_or("ease")));
+            // A delay in quarter seconds, so the value is exact after conversion.
+            let delay = (duration.is_some() && rng.next() % 2 == 0).then(|| rng.next() % 4);
+            match delay {
+                Some(k) => {
+                    parts.push(format!("{}ms", k * 250));
+                    delays.push(Value::Time {
+                        value: (k * 250) as f64 / 1000.0,
+                        unit: TimeUnit::S,
+                    });
+                }
+                None => delays.push(Value::Time {
+                    value: 0.0,
+                    unit: TimeUnit::S,
+                }),
+            }
+            // A layer needs at least one part. `all` is what an omitted property means.
+            if parts.is_empty() {
+                parts.push("all".to_string());
+            }
+            text.push(parts.join(" "));
+        }
+        let css = format!("child {{ transition: {} }}", text.join(", "));
+        assert_eq!(
+            px_of(&css, "transition-property"),
+            Value::List(props),
+            "{css}"
+        );
+        assert_eq!(
+            px_of(&css, "transition-duration"),
+            Value::List(durations),
+            "{css}"
+        );
+        assert_eq!(
+            px_of(&css, "transition-timing-function"),
+            Value::List(easings),
+            "{css}"
+        );
+        assert_eq!(
+            px_of(&css, "transition-delay"),
+            Value::List(delays),
+            "{css}"
+        );
+    }
+}
+
+#[test]
+fn list_style_fills_each_longhand_from_its_own_keyword_in_any_order() {
+    // `list-style: [type || position]` in either order. An omitted type is `disc`,
+    // an omitted position is `outside`, and the image is `none`.
+    use tpt_css::values::Value;
+    const TYPES: &[&str] = &["disc", "circle", "square", "decimal"];
+    const POSITIONS: &[&str] = &["inside", "outside"];
+    let mut rng = Rng(0x5EED_0009);
+    for _ in 0..200 {
+        let ty = (rng.next() % 2 == 0).then(|| rng.pick(TYPES));
+        let pos = (rng.next() % 2 == 0).then(|| rng.pick(POSITIONS));
+        let mut words: Vec<&str> = ty.into_iter().chain(pos).collect();
+        if words.is_empty() {
+            continue;
+        }
+        if words.len() == 2 && rng.next() % 2 == 0 {
+            words.swap(0, 1);
+        }
+        let css = format!("child {{ list-style: {} }}", words.join(" "));
+        assert_eq!(
+            px_of(&css, "list-style-type"),
+            Value::Keyword(ty.unwrap_or("disc")),
+            "{css}"
+        );
+        assert_eq!(
+            px_of(&css, "list-style-position"),
+            Value::Keyword(pos.unwrap_or("outside")),
+            "{css}"
+        );
+        assert_eq!(
+            px_of(&css, "list-style-image"),
+            Value::Keyword("none"),
+            "{css}"
+        );
+    }
+}
+
+/// The unitless value of a math expression, checked as `calc(<expr> * 1px)`.
+fn unitless(expr: &str) -> Option<f64> {
+    px_number(&px_of(
+        &format!("child {{ margin-left: calc({expr} * 1px) }}"),
+        "margin-left",
+    ))
+}
+
+#[test]
+fn font_shorthand_fills_each_longhand_for_seeded_forms() {
+    // CSS Fonts 4 section 4.3: `[style] [weight] size[/line-height] family`.
+    // An omitted style is `normal`, weight is 400, and line height is `normal`.
+    use tpt_css::values::Value;
+    const FAMILIES: &[&str] = &["serif", "sans-serif", "monospace"];
+    let mut rng = Rng(0x5EED_000A);
+    for _ in 0..200 {
+        let italic = rng.next() % 2 == 0;
+        let (weight_text, weight_want) = match rng.next() % 3 {
+            0 => (None, Value::Number(400.0)),
+            // `bold` computes to 700 (CSS Fonts 4 section 3.2).
+            1 => (Some("bold".to_string()), Value::Number(700.0)),
+            _ => {
+                let n = 100 * (1 + rng.next() % 9);
+                (Some(n.to_string()), Value::Number(n as f64))
+            }
+        };
+        let size = 10 + rng.next() % 31;
+        let line = (rng.next() % 2 == 0).then(|| 12 + rng.next() % 20);
+        let family = rng.pick(FAMILIES);
+
+        let mut parts = Vec::new();
+        if italic {
+            parts.push("italic".to_string());
+        }
+        if let Some(w) = &weight_text {
+            parts.push(w.clone());
+        }
+        let mut size_text = format!("{size}px");
+        if let Some(l) = line {
+            size_text.push_str(&format!("/{l}px"));
+        }
+        parts.push(size_text);
+        parts.push(family.to_string());
+        let css = format!("child {{ font: {} }}", parts.join(" "));
+
+        let style = if italic { "italic" } else { "normal" };
+        assert_eq!(px_of(&css, "font-style"), Value::Keyword(style), "{css}");
+        assert_eq!(px_of(&css, "font-weight"), weight_want, "{css}");
+        assert_eq!(px_of(&css, "font-size"), Value::px(size as f64), "{css}");
+        let line_want = match line {
+            Some(l) => Value::px(l as f64),
+            None => Value::Keyword("normal"),
+        };
+        assert_eq!(px_of(&css, "line-height"), line_want, "{css}");
+        assert_eq!(
+            px_of(&css, "font-family"),
+            Value::FontFamily(vec![family.to_string()]),
+            "{css}"
+        );
+    }
+}
+
+#[test]
+fn background_shorthand_sets_color_and_image_in_either_order() {
+    // `background` takes one color and one image (`none` here), in any order.
+    // An omitted color is `transparent`, and an omitted image is `none`.
+    use tpt_css::values::Value;
+    const COLORS: &[&str] = &["red", "blue", "transparent"];
+    let mut rng = Rng(0x5EED_000B);
+    for _ in 0..200 {
+        let color = (rng.next() % 2 == 0).then(|| rng.pick(COLORS));
+        let image = rng.next() % 2 == 0;
+        let mut words: Vec<&str> = color.into_iter().collect();
+        if image {
+            words.push("none");
+        }
+        if words.is_empty() {
+            continue;
+        }
+        if words.len() == 2 && rng.next() % 2 == 0 {
+            words.swap(0, 1);
+        }
+        let css = format!("child {{ background: {} }}", words.join(" "));
+        let want = px_of(
+            &format!(
+                "child {{ background-color: {} }}",
+                color.unwrap_or("transparent")
+            ),
+            "background-color",
+        );
+        assert_eq!(px_of(&css, "background-color"), want, "{css}");
+        assert_eq!(
+            px_of(&css, "background-image"),
+            Value::Keyword("none"),
+            "{css}"
+        );
+    }
+}
+
+#[test]
+fn text_decoration_line_stores_every_subset_in_spec_order() {
+    // Any non-empty set of line keywords, in any order, is stored once each in the
+    // fixed order `underline overline line-through blink`.
+    use tpt_css::values::Value;
+    const LINES: &[&str] = &["underline", "overline", "line-through", "blink"];
+    let mut rng = Rng(0x5EED_000C);
+    for _ in 0..200 {
+        let mut chosen: Vec<&str> = LINES
+            .iter()
+            .copied()
+            .filter(|_| rng.next() % 2 == 0)
+            .collect();
+        if chosen.is_empty() {
+            continue;
+        }
+        for i in (1..chosen.len()).rev() {
+            let j = (rng.next() % (i as u64 + 1)) as usize;
+            chosen.swap(i, j);
+        }
+        let css = format!("child {{ text-decoration-line: {} }}", chosen.join(" "));
+        let want: Vec<&str> = LINES
+            .iter()
+            .copied()
+            .filter(|l| chosen.contains(l))
+            .collect();
+        match px_of(&css, "text-decoration-line") {
+            Value::Keyword(stored) => {
+                assert_eq!(stored.split(' ').collect::<Vec<_>>(), want, "{css}")
+            }
+            other => panic!("{css}: unexpected {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn math_functions_match_their_definitions_on_seeded_inputs() {
+    // The unitless functions, checked inside `calc(... * 1px)`. Tolerances cover
+    // the float error of the transcendental functions only.
+    use tpt_css::values::Value;
+    let near = |got: Option<f64>, want: f64, what: &str| {
+        let ok = got.is_some_and(|v| (v - want).abs() < 1e-9);
+        assert!(ok, "{what} = {got:?}, want {want}");
+    };
+    let mut rng = Rng(0x5EED_000D);
+    for _ in 0..200 {
+        let a = (rng.next() % 41) as f64 - 20.0;
+        let x = (rng.next() % 5) as f64 + 1.0;
+        let y = (rng.next() % 5) as f64;
+        let r = (rng.next() % 300) as f64 / 100.0 - 1.5;
+        let s = (rng.next() % 201) as f64 / 100.0 - 1.0;
+
+        // abs and sign of a length.
+        assert_eq!(
+            px_of(
+                &format!("child {{ margin-left: abs({a}px) }}"),
+                "margin-left"
+            ),
+            Value::px(a.abs()),
+            "abs({a}px)"
+        );
+        let sign = if a > 0.0 {
+            1.0
+        } else if a < 0.0 {
+            -1.0
+        } else {
+            0.0
+        };
+        near(
+            unitless(&format!("sign({a}px) * 10")),
+            sign * 10.0,
+            &format!("sign({a}px)"),
+        );
+
+        near(
+            unitless(&format!("sqrt({x})")),
+            x.sqrt(),
+            &format!("sqrt({x})"),
+        );
+        near(
+            unitless(&format!("pow({x}, {y})")),
+            x.powf(y),
+            &format!("pow({x}, {y})"),
+        );
+        near(
+            unitless(&format!("exp({r})")),
+            r.exp(),
+            &format!("exp({r})"),
+        );
+        near(unitless(&format!("log({x})")), x.ln(), &format!("log({x})"));
+        near(
+            unitless(&format!("sin({r})")),
+            r.sin(),
+            &format!("sin({r})"),
+        );
+        near(
+            unitless(&format!("cos({r})")),
+            r.cos(),
+            &format!("cos({r})"),
+        );
+        near(
+            unitless(&format!("tan({r})")),
+            r.tan(),
+            &format!("tan({r})"),
+        );
+        near(
+            unitless(&format!("asin({s})")),
+            s.asin(),
+            &format!("asin({s})"),
+        );
+        near(
+            unitless(&format!("acos({s})")),
+            s.acos(),
+            &format!("acos({s})"),
+        );
+        near(
+            unitless(&format!("atan({r})")),
+            r.atan(),
+            &format!("atan({r})"),
+        );
+        near(
+            unitless(&format!("atan2({a}, {x})")),
+            (a).atan2(x),
+            &format!("atan2({a}, {x})"),
+        );
+    }
+}

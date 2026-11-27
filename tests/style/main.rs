@@ -253,10 +253,6 @@ fn pass_through_properties_keep_their_canonical_text() {
     // A grammar this engine does not parse is still accepted as text. `box-shadow`
     // and `transform` are typed now (see the typed-value tests below).
     assert_eq!(
-        parse_value("transition", "all 0.2s ease-in"),
-        Some(Value::Raw("all 0.2s ease-in".to_string()))
-    );
-    assert_eq!(
         parse_value("grid", "none"),
         Some(Value::Raw("none".to_string()))
     );
@@ -314,18 +310,45 @@ fn counter_properties_parse_names_and_integers() {
 #[test]
 fn pass_through_initial_values_are_text() {
     assert_eq!(
-        spec(lookup("flex").unwrap()).initial.to_value(),
-        Value::Raw("0 1 auto".to_string())
-    );
-    assert_eq!(
-        spec(lookup("transition").unwrap()).initial.to_value(),
-        Value::Raw("all 0s ease 0s".to_string())
+        spec(lookup("grid").unwrap()).initial.to_value(),
+        Value::Raw("none".to_string())
     );
 }
 
 #[test]
-fn registry_has_37_properties_and_ids_match_their_rows() {
-    assert_eq!(PROPERTIES.len(), 107);
+fn flex_and_transition_are_shorthands_with_typed_longhands() {
+    // Both are shorthands now, so they have no registry row of their own.
+    assert_eq!(lookup("transition"), None);
+    assert_eq!(lookup("flex"), None);
+    assert_eq!(
+        spec(lookup("flex-grow").unwrap()).initial.to_value(),
+        Value::Number(0.0)
+    );
+    assert_eq!(
+        spec(lookup("flex-shrink").unwrap()).initial.to_value(),
+        Value::Number(1.0)
+    );
+    assert_eq!(
+        spec(lookup("flex-basis").unwrap()).initial.to_value(),
+        Value::Keyword("auto")
+    );
+    assert_eq!(
+        spec(lookup("transition-property").unwrap())
+            .initial
+            .to_value(),
+        Value::List(vec![Value::Keyword("all")])
+    );
+    assert_eq!(
+        spec(lookup("transition-timing-function").unwrap())
+            .initial
+            .to_value(),
+        Value::List(vec![Value::Keyword("ease")])
+    );
+}
+
+#[test]
+fn registry_has_123_properties_and_ids_match_their_rows() {
+    assert_eq!(PROPERTIES.len(), 123);
     assert_eq!(PROPERTIES[ids::DISPLAY.index()].name, "display");
     assert_eq!(PROPERTIES[ids::COLOR.index()].name, "color");
     assert_eq!(PROPERTIES[ids::FONT_FAMILY.index()].name, "font-family");
@@ -518,10 +541,18 @@ fn background_shorthand_sets_image_and_color_and_resets_omitted_ones() {
         SpecifiedValue::Value(Value::Color(Color::TRANSPARENT))
     );
 
-    // Two colors, two images, or a layer list are not supported.
+    // Two colors, or two images in one layer, are invalid. Images in separate
+    // layers form a list.
     assert!(expand("red blue").is_err());
     assert!(expand("url(a.png) url(b.png)").is_err());
-    assert!(expand("url(a.png), url(b.png)").is_err());
+    let layered = expand("url(a.png), url(b.png)").unwrap();
+    assert_eq!(
+        get(&layered, "background-image"),
+        SpecifiedValue::Value(Value::Raw("url(\"a.png\"), url(\"b.png\")".to_string()))
+    );
+    // A color belongs to the last layer only.
+    assert!(expand("red, url(a.png)").is_err());
+    assert!(expand("url(a.png), red").is_ok());
 }
 
 #[test]

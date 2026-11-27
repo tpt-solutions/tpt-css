@@ -2,7 +2,7 @@
 
 # Property support
 
-107 properties are registered. A registered property is parsed and computed. Pass-through properties keep their value as text. Properties that are not registered are reported as `info` diagnostics and ignored.
+123 properties are registered. A registered property is parsed and computed. Pass-through properties keep their value as text. Properties that are not registered are reported as `info` diagnostics and ignored.
 
 | Property | Grammar | Inherited | Initial | Spec |
 | --- | --- | --- | --- | --- |
@@ -96,8 +96,8 @@
 | `font-variant-caps` | keywords | yes | `normal` | [link](https://www.w3.org/TR/css-fonts-4/) |
 | `box-shadow` | shadow-list | no | `none` | [link](https://www.w3.org/TR/css-backgrounds-3/) |
 | `transform` | transform-list | no | `none` | [link](https://www.w3.org/TR/css-transforms-2/) |
-| `transition` | pass-through (text) | no | `all 0s ease 0s` | [link](https://www.w3.org/TR/css-transitions-1/) |
-| `flex` | pass-through (text) | no | `0 1 auto` | [link](https://www.w3.org/TR/css-flexbox-1/) |
+| `transition-property` | transition-property-list | no | `all` | [link](https://www.w3.org/TR/css-transitions-1/) |
+| `flex-grow` | number | no | `0` | [link](https://www.w3.org/TR/css-flexbox-1/) |
 | `grid` | pass-through (text) | no | `none` | [link](https://www.w3.org/TR/css-grid-2/) |
 | `background-image` | image | no | `none` | [link](https://www.w3.org/TR/css-backgrounds-3/) |
 | `counter-reset` | counters | no | `none` | [link](https://www.w3.org/TR/css-lists-3/) |
@@ -113,7 +113,23 @@
 | `font-variant-position` | keywords | yes | `normal` | [link](https://www.w3.org/TR/css-fonts-4/) |
 | `font-variant-emoji` | keywords | yes | `normal` | [link](https://www.w3.org/TR/css-fonts-4/) |
 | `font-variant-alternates` | font-variant-alternates | yes | `normal` | [link](https://www.w3.org/TR/css-fonts-4/) |
+| `flex-shrink` | number | no | `1` | [link](https://www.w3.org/TR/css-flexbox-1/) |
+| `flex-basis` | length-percentage | no | `auto` | [link](https://www.w3.org/TR/css-flexbox-1/) |
+| `transition-timing-function` | easing-list | no | `ease` | [link](https://www.w3.org/TR/css-transitions-1/) |
+| `animation-name` | animation-name-list | no | `none` | [link](https://www.w3.org/TR/css-animations-1/) |
+| `animation-timing-function` | easing-list | no | `ease` | [link](https://www.w3.org/TR/css-animations-1/) |
+| `animation-iteration-count` | iteration-count-list | no | `1` | [link](https://www.w3.org/TR/css-animations-1/) |
+| `animation-direction` | keyword-list | no | `normal` | [link](https://www.w3.org/TR/css-animations-1/) |
+| `animation-fill-mode` | keyword-list | no | `none` | [link](https://www.w3.org/TR/css-animations-1/) |
+| `animation-play-state` | keyword-list | no | `running` | [link](https://www.w3.org/TR/css-animations-1/) |
+| `filter` | filter-list | no | `none` | [link](https://www.w3.org/TR/filter-effects-1/) |
+| `background-position` | background-layer-list | no | `0% 0%` | [link](https://www.w3.org/TR/css-backgrounds-3/) |
+| `background-size` | background-layer-list | no | `auto` | [link](https://www.w3.org/TR/css-backgrounds-3/) |
+| `background-repeat` | background-layer-list | no | `repeat` | [link](https://www.w3.org/TR/css-backgrounds-3/) |
+| `background-attachment` | background-layer-list | no | `scroll` | [link](https://www.w3.org/TR/css-backgrounds-3/) |
+| `background-origin` | background-layer-list | no | `padding-box` | [link](https://www.w3.org/TR/css-backgrounds-3/) |
+| `background-clip` | background-layer-list | no | `border-box` | [link](https://www.w3.org/TR/css-backgrounds-3/) |
 
 ## Shorthands
 
-16 shorthands expand into longhands. Their names: `margin`, `padding`, `border-width`, `border-style`, `border-color`, `border`, `border-top`, `border-right`, `border-bottom`, `border-left`, `background`, `border-radius`, `font`, `list-style`, `text-decoration`, `font-variant`.
+19 shorthands expand into longhands. Their names: `flex`, `transition`, `animation`, `margin`, `padding`, `border-width`, `border-style`, `border-color`, `border`, `border-top`, `border-right`, `border-bottom`, `border-left`, `background`, `border-radius`, `font`, `list-style`, `text-decoration`, `font-variant`.

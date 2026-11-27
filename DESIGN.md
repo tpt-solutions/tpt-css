@@ -734,6 +734,63 @@ engineering measurements, not claims about other machines (spec 21.1).
     value. That is the property a host relies on when it writes an initial value as
     text.
 
+62. **`flex`, `transition`, and `animation` are typed shorthands.** They were
+    pass-through text (decision 37). Each is now a shorthand in `SHORTHANDS`, with
+    typed longhands. The registry rows for `transition` and `flex` were replaced in
+    place, so the IDs of the other properties did not move. The new longhands are
+    appended.
+    - `flex` follows CSS Flexbox 1. A unitless number is a flex factor while fewer
+      than two are present. After that, a unitless zero is a basis. An omitted basis
+      is `0%` when factors are given.
+    - `transition` and `animation` have one list entry per comma-separated layer.
+      The first time is the duration and the second is the delay. A layer's
+      property name cannot be an easing keyword. `animation` treats `none` as the
+      name when no name is given, and as the fill mode otherwise. An animation name
+      keeps its case, because keyframe names are case-sensitive. A transition
+      property name is lowercased, because property names are case-insensitive.
+    - Easing functions are checked (`cubic-bezier()` x values in `[0, 1]`, and
+      `steps()` with a positive count, where `jump-none` needs two steps). They are
+      kept as canonical text, as `Value::Raw`.
+    - `grid` stays pass-through.
+
+63. **`filter` is typed.** Filter functions are checked and stored as
+    `Value::Transforms`, as `transform` is. Each function takes its spec default when
+    its argument is omitted: `blur()` is `0px`, the amount functions are `1`, and
+    `hue-rotate()` is `0deg`. A percentage amount is stored as its fraction. A negative
+    amount, a negative blur, or an angle where a length belongs is invalid.
+    `drop-shadow()` takes two offsets, an optional blur, and an optional color in any
+    position. The filter list is space-separated, not comma-separated. A list that
+    names a `url()` is kept as canonical text, because a reference is not resolved
+    here. The same rule as `background-image` applies.
+
+64. **Typed `attr()` in any property.** `attr(name)` in `content` stays a content
+    item, read at computed-value time (decision 43). Every other form is substituted
+    into the declaration before it is parsed, as `var()` is (`style/attr.rs`). The
+    forms are `attr(name string)`, `attr(name <unit>)` (a plain number plus the unit),
+    and `attr(name type(<syntax>))`. The syntaxes are `<number>`, `<integer>`,
+    `<length>`, `<percentage>`, `<length-percentage>`, `<color>`, and `<time>`. A
+    missing attribute, or one that does not match, takes the fallback. Without one,
+    a string is empty and any other type makes the declaration invalid at
+    computed-value time. In `content`, a typed value is given as a string.
+    Invalidation is unchanged in kind: a deferred declaration that reads `attr()`
+    marks every attribute as read, as `var()` does for `content`. Sharing keys on
+    attributes when such a declaration exists.
+
+65. **`background` layers.** The shorthand takes a comma-separated list of layers,
+    as CSS Backgrounds 3 does. This supersedes the single-layer rule of decision 43.
+    A layer takes an image, a position with an optional `/ size`, one or two repeat
+    keywords, an attachment, one or two boxes, and, in the last layer only, a color.
+    There are six new longhands (`background-position`, `background-size`,
+    `background-repeat`, `background-attachment`, `background-origin`, and
+    `background-clip`). Each is a list with one item per layer. Each part is checked by
+    the grammar of its own longhand, so the rules are in one place. A position is one
+    to four values, with edge keywords and offsets. A size is `auto`, `cover`,
+    `contain`, or one or two sizes. A position or size with two words is kept as its
+    canonical text. Images stay as text (decision 37). A single image is its text, and
+    `none` alone is the keyword. Images in several layers form one comma-separated
+    text. A `none` layer appears as `none` in that text, which the longhand grammar
+    does not accept back, so the text is not meant to be re-parsed.
+
 ### Still open
 
 - Scope proximity is implemented (decision 12). The order matches the Cascade 6 draft. `spec.txt` 13.3 was corrected in a39110c.
@@ -751,9 +808,9 @@ engineering measurements, not claims about other machines (spec 21.1).
   deterministic, which is not the same thing.
 - The WPT subsuites are out of scope (decision 33).
 - Calc depth: the configured `max_calc_depth` is the effective limit (decision 13). The value parser recurses up to 256, the default component nesting limit.
-- Long-tail properties still missing: typed grammars for `transition`, `flex`,
-  `grid`, and `filter` (they are pass-through text, decision 37), and resolution
-  values. `box-shadow`, `transform`, the time properties, and angles are typed
+- Long-tail properties still missing: a typed grammar for `grid` (it is
+  pass-through text, decision 37), and resolution values. `transition`, `animation`,
+  `flex`, and `filter` are typed (decisions 62 and 63). `box-shadow`, `transform`, the time properties, and angles are typed
   (decision 51). `border-radius` is done, including the elliptical form
   (`Value::Elliptical`).
 - Full resolve grew by roughly 35 to 60 percent in the runs here when the registry went from 50 to 80

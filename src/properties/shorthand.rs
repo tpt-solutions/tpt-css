@@ -61,6 +61,37 @@ const BORDER_COLOR: [&str; 4] = [
     "border-left-color",
 ];
 
+const FLEX: [&str; 3] = ["flex-grow", "flex-shrink", "flex-basis"];
+
+const BACKGROUND: [&str; 8] = [
+    "background-color",
+    "background-image",
+    "background-position",
+    "background-size",
+    "background-repeat",
+    "background-attachment",
+    "background-origin",
+    "background-clip",
+];
+
+const ANIMATION: [&str; 8] = [
+    "animation-name",
+    "animation-duration",
+    "animation-timing-function",
+    "animation-delay",
+    "animation-iteration-count",
+    "animation-direction",
+    "animation-fill-mode",
+    "animation-play-state",
+];
+
+const TRANSITION: [&str; 4] = [
+    "transition-property",
+    "transition-duration",
+    "transition-timing-function",
+    "transition-delay",
+];
+
 const RADIUS: [&str; 4] = [
     "border-top-left-radius",
     "border-top-right-radius",
@@ -103,6 +134,21 @@ fn radius_expand(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> {
 /// Every shorthand supported in M1. A shorthand's index in this table is the
 /// id stored in [`SpecifiedValue::Unparsed`].
 pub const SHORTHANDS: &[ShorthandSpec] = &[
+    ShorthandSpec {
+        name: "flex",
+        longhands: &FLEX,
+        expand: flex_expand,
+    },
+    ShorthandSpec {
+        name: "transition",
+        longhands: &TRANSITION,
+        expand: transition_expand,
+    },
+    ShorthandSpec {
+        name: "animation",
+        longhands: &ANIMATION,
+        expand: animation_expand,
+    },
     ShorthandSpec {
         name: "margin",
         longhands: &MARGIN,
@@ -180,7 +226,7 @@ pub const SHORTHANDS: &[ShorthandSpec] = &[
     },
     ShorthandSpec {
         name: "background",
-        longhands: &["background-color", "background-image"],
+        longhands: &BACKGROUND,
         expand: background,
     },
     ShorthandSpec {
@@ -606,6 +652,262 @@ fn text_decoration(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> 
     ])
 }
 
+/// `flex: none | [ <grow> <shrink>? || <basis> ]` (CSS Flexbox 1 section 7.2).
+///
+/// A unitless number is a flex factor while fewer than two are present. After
+/// that, a unitless zero is a basis, as the spec requires. An omitted shrink is
+/// 1. Without factors, grow and shrink are 1 and the basis is given.
+///
+/// With factors and no basis, the basis is `0%`.
+fn flex_expand(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> {
+    let parts = chunks(values);
+    if let [part] = parts.as_slice() {
+        if chunks_is_none(part) {
+            return Ok(vec![
+                ("flex-grow", SpecifiedValue::Value(Value::Number(0.0))),
+                ("flex-shrink", SpecifiedValue::Value(Value::Number(0.0))),
+                ("flex-basis", initial_value("flex-basis")),
+            ]);
+        }
+    }
+    if parts.is_empty() {
+        return Err(InvalidValue);
+    }
+    let mut factors: Vec<f64> = Vec::new();
+    let mut basis: Option<SpecifiedValue> = None;
+    for part in parts {
+        if factors.len() < 2 {
+            if let Ok(SpecifiedValue::Value(Value::Number(n))) = parse_as("flex-grow", part) {
+                factors.push(n);
+                continue;
+            }
+        }
+        if basis.is_some() {
+            return Err(InvalidValue);
+        }
+        basis = Some(parse_as("flex-basis", part)?);
+    }
+    let grow = factors.first().copied().unwrap_or(1.0);
+    let shrink = factors.get(1).copied().unwrap_or(1.0);
+    let basis = basis.unwrap_or(SpecifiedValue::Value(Value::Percentage(0.0)));
+    Ok(vec![
+        ("flex-grow", SpecifiedValue::Value(Value::Number(grow))),
+        ("flex-shrink", SpecifiedValue::Value(Value::Number(shrink))),
+        ("flex-basis", basis),
+    ])
+}
+
+/// `transition: [ <property> || <duration> || <timing-function> || <delay> ]#`
+/// (CSS Transitions 1 section 2).
+///
+/// Each comma-separated layer sets one entry in each of the four longhand lists.
+/// The first time is the duration and the second is the delay. An omitted
+/// property is `all`, an omitted timing function is `ease`, and an omitted
+/// duration or delay is `0s`.
+fn transition_expand(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> {
+    let zero = || Value::Time {
+        value: 0.0,
+        unit: crate::values::TimeUnit::S,
+    };
+    let (mut properties, mut durations, mut timings, mut delays) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for layer in values.split(|v| v.is_token(&TokenKind::Comma)) {
+        let layer = crate::syntax::trim_whitespace(layer);
+        let parts = chunks(layer);
+        if parts.is_empty() {
+            return Err(InvalidValue);
+        }
+        let (mut property, mut duration, mut timing, mut delay) = (None, None, None, None);
+        for part in parts {
+            if duration.is_none() {
+                if let Some(time) = single_item(parse_as("transition-duration", part)) {
+                    duration = Some(time);
+                    continue;
+                }
+            } else if delay.is_none() {
+                if let Some(time) = single_item(parse_as("transition-delay", part)) {
+                    delay = Some(time);
+                    continue;
+                }
+            }
+            if timing.is_none() {
+                if let Some(easing) = single_item(parse_as("transition-timing-function", part)) {
+                    timing = Some(easing);
+                    continue;
+                }
+            }
+            // An easing keyword is not a property name, even a second time.
+            if property.is_none() && parse_as("transition-timing-function", part).is_err() {
+                if let Some(name) = single_item(parse_as("transition-property", part)) {
+                    property = Some(name);
+                    continue;
+                }
+            }
+            return Err(InvalidValue);
+        }
+        properties.push(property.unwrap_or(Value::Keyword("all")));
+        durations.push(duration.unwrap_or_else(zero));
+        timings.push(timing.unwrap_or(Value::Keyword("ease")));
+        delays.push(delay.unwrap_or_else(zero));
+    }
+    Ok(vec![
+        (
+            "transition-property",
+            SpecifiedValue::Value(Value::List(properties)),
+        ),
+        (
+            "transition-duration",
+            SpecifiedValue::Value(Value::List(durations)),
+        ),
+        (
+            "transition-timing-function",
+            SpecifiedValue::Value(Value::List(timings)),
+        ),
+        (
+            "transition-delay",
+            SpecifiedValue::Value(Value::List(delays)),
+        ),
+    ])
+}
+
+/// `animation: [ <name> || <duration> || <timing-function> || <delay> ||
+/// <iteration-count> || <direction> || <fill-mode> || <play-state> ]#`
+/// (CSS Animations 1 section 3).
+///
+/// Each comma-separated layer sets one entry in each of the eight longhand lists.
+/// The first time is the duration and the second is the delay. `none` is the
+/// name when no name has been given, and otherwise the fill mode. A name cannot
+/// be a keyword of another longhand. The defaults are the initial values.
+fn animation_expand(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> {
+    let mut columns: Vec<Vec<Value>> = vec![Vec::new(); ANIMATION.len()];
+    for layer in values.split(|v| v.is_token(&TokenKind::Comma)) {
+        let parts = chunks(crate::syntax::trim_whitespace(layer));
+        if parts.is_empty() {
+            return Err(InvalidValue);
+        }
+        let mut current = AnimationLayer::default();
+        for part in parts {
+            if !place_animation_part(&mut current, part) {
+                return Err(InvalidValue);
+            }
+        }
+        for (column, value) in columns.iter_mut().zip(current.finish()) {
+            column.push(value);
+        }
+    }
+    Ok(ANIMATION
+        .iter()
+        .zip(columns)
+        .map(|(name, items)| (*name, SpecifiedValue::Value(Value::List(items))))
+        .collect())
+}
+
+/// The values of one `animation` layer. Each slot is filled once.
+#[derive(Default)]
+struct AnimationLayer {
+    name: Option<Value>,
+    duration: Option<Value>,
+    timing: Option<Value>,
+    delay: Option<Value>,
+    iteration: Option<Value>,
+    direction: Option<Value>,
+    fill: Option<Value>,
+    play: Option<Value>,
+}
+
+impl AnimationLayer {
+    /// The eight values in the order of [`ANIMATION`], with the initial values for
+    /// the parts that were omitted.
+    fn finish(self) -> [Value; 8] {
+        let zero = || Value::Time {
+            value: 0.0,
+            unit: crate::values::TimeUnit::S,
+        };
+        [
+            self.name.unwrap_or(Value::Keyword("none")),
+            self.duration.unwrap_or_else(zero),
+            self.timing.unwrap_or(Value::Keyword("ease")),
+            self.delay.unwrap_or_else(zero),
+            self.iteration.unwrap_or(Value::Number(1.0)),
+            self.direction.unwrap_or(Value::Keyword("normal")),
+            self.fill.unwrap_or(Value::Keyword("none")),
+            self.play.unwrap_or(Value::Keyword("running")),
+        ]
+    }
+}
+
+/// Places one chunk of an `animation` layer in the first free slot that accepts
+/// it. Returns `false` when no slot takes the chunk.
+fn place_animation_part(layer: &mut AnimationLayer, part: &[ComponentValue]) -> bool {
+    let none_name = match single_item(parse_as("animation-fill-mode", part)) {
+        Some(none @ Value::Keyword("none")) if layer.name.is_none() => Some(none),
+        _ => None,
+    };
+    take(
+        &mut layer.duration,
+        single_item(parse_as("animation-duration", part)),
+    ) || take(
+        &mut layer.delay,
+        single_item(parse_as("animation-delay", part)),
+    ) || take(
+        &mut layer.timing,
+        single_item(parse_as("animation-timing-function", part)),
+    ) || take(
+        &mut layer.iteration,
+        single_item(parse_as("animation-iteration-count", part)),
+    ) || take(
+        &mut layer.direction,
+        single_item(parse_as("animation-direction", part)),
+    ) || take(
+        &mut layer.play,
+        single_item(parse_as("animation-play-state", part)),
+    ) || take(&mut layer.name, none_name)
+        || take(
+            &mut layer.fill,
+            single_item(parse_as("animation-fill-mode", part)),
+        )
+        || (!is_other_animation_keyword(part)
+            && take(
+                &mut layer.name,
+                single_item(parse_as("animation-name", part)),
+            ))
+}
+
+/// Whether a chunk is a keyword of another `animation` longhand, which a name
+/// cannot be.
+fn is_other_animation_keyword(part: &[ComponentValue]) -> bool {
+    [
+        "animation-timing-function",
+        "animation-iteration-count",
+        "animation-direction",
+        "animation-fill-mode",
+        "animation-play-state",
+    ]
+    .iter()
+    .any(|name| parse_as(name, part).is_ok())
+}
+
+/// Stores `value` in an empty slot. Returns `false` when there is no value or the
+/// slot is taken.
+fn take(slot: &mut Option<Value>, value: Option<Value>) -> bool {
+    match value {
+        Some(value) if slot.is_none() => {
+            *slot = Some(value);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// The one item of a list-valued longhand parsed from a single chunk. The
+/// longhands are lists, so a single chunk gives a list of one.
+fn single_item(result: Result<SpecifiedValue, InvalidValue>) -> Option<Value> {
+    match result {
+        Ok(SpecifiedValue::Value(Value::List(mut items))) if items.len() == 1 => items.pop(),
+        _ => None,
+    }
+}
+
 /// The initial value of a longhand, as a specified value.
 fn initial_value(name: &str) -> SpecifiedValue {
     let id = lookup(name).expect("registered");
@@ -799,35 +1101,258 @@ fn side_name(part: &str, side: &str) -> &'static str {
 /// order. Each is optional. An omitted image is `none` and an omitted color is
 /// `transparent`, because the shorthand resets every longhand it covers. Layer
 /// lists (commas between images) are not supported.
+/// `background`: one or more comma-separated layers (CSS Backgrounds 3 section
+/// 2.1). A layer takes an image, a position with an optional `/ size`, a repeat
+/// style, an attachment, one or two boxes, and, in the last layer only, a color.
+/// Omitted parts take their initial values.
+///
+/// Each part is checked by the grammar of its own longhand. The images form one
+/// list. A single image is its text, and `none` alone is the keyword.
 fn background(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> {
-    let parts = chunks(values);
-    if parts.is_empty() {
+    let layers: Vec<&[ComponentValue]> = values.split(|v| v.is_token(&TokenKind::Comma)).collect();
+    let count = layers.len();
+    let mut parsed = Vec::with_capacity(count);
+    for (i, layer) in layers.into_iter().enumerate() {
+        parsed.push(background_layer(layer, i + 1 == count)?);
+    }
+
+    let images: Vec<&Value> = parsed.iter().map(|l| &l.image).collect();
+    let image = if images.iter().all(|v| matches!(v, Value::Keyword("none"))) {
+        Value::Keyword("none")
+    } else {
+        Value::Raw(
+            images
+                .iter()
+                .map(|v| match v {
+                    Value::Raw(text) => text.clone(),
+                    _ => "none".to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join(", "),
+        )
+    };
+    let color = parsed
+        .last()
+        .and_then(|l| l.color.clone())
+        .unwrap_or_else(|| Initial::Transparent.to_value());
+    let per_layer = |pick: fn(&BackgroundLayer) -> &Value| {
+        SpecifiedValue::Value(Value::List(
+            parsed.iter().map(|l| pick(l).clone()).collect(),
+        ))
+    };
+    Ok(vec![
+        ("background-color", SpecifiedValue::Value(color)),
+        ("background-image", SpecifiedValue::Value(image)),
+        ("background-position", per_layer(|l| &l.position)),
+        ("background-size", per_layer(|l| &l.size)),
+        ("background-repeat", per_layer(|l| &l.repeat)),
+        ("background-attachment", per_layer(|l| &l.attachment)),
+        ("background-origin", per_layer(|l| &l.origin)),
+        ("background-clip", per_layer(|l| &l.clip)),
+    ])
+}
+
+/// The values of one `background` layer, one for each longhand.
+struct BackgroundLayer {
+    image: Value,
+    position: Value,
+    size: Value,
+    repeat: Value,
+    attachment: Value,
+    origin: Value,
+    clip: Value,
+    color: Option<Value>,
+}
+
+/// Parses one layer of `background`. Words are split at spaces and at `/`.
+fn background_layer(
+    layer: &[ComponentValue],
+    is_last: bool,
+) -> Result<BackgroundLayer, InvalidValue> {
+    let words = layer_words(layer);
+    if words.is_empty() {
         return Err(InvalidValue);
     }
     let mut image = None;
     let mut color = None;
-    for part in &parts {
-        if let Ok(value) = parse_as("background-image", part) {
-            match value {
-                SpecifiedValue::Value(_) if image.is_none() => image = Some(value),
-                _ => return Err(InvalidValue),
+    let mut position: Vec<&[ComponentValue]> = Vec::new();
+    let mut position_done = false;
+    let mut size: Vec<&[ComponentValue]> = Vec::new();
+    let mut in_size = false;
+    let mut slash_seen = false;
+    let mut repeat: Vec<&[ComponentValue]> = Vec::new();
+    let mut attachment = None;
+    let mut boxes: Vec<&[ComponentValue]> = Vec::new();
+
+    for word in words {
+        // A size is one or two size words after `/`. The first word that is not a
+        // size ends it, and the rest of the layer follows.
+        if in_size {
+            if size.len() < 2
+                && !is_slash_word(word)
+                && single_value(parse_as("background-size", word)).is_some()
+            {
+                size.push(word);
+                continue;
             }
-        } else {
-            match parse_as("background-color", part)? {
-                SpecifiedValue::Value(_) if color.is_none() => color = Some(part),
-                _ => return Err(InvalidValue),
+            in_size = false;
+        }
+        if is_slash_word(word) {
+            // One size, after the position and before the rest of the layer.
+            if position.is_empty() || slash_seen {
+                return Err(InvalidValue);
+            }
+            slash_seen = true;
+            in_size = true;
+            continue;
+        }
+        if single_value(parse_as("background-position", word)).is_some() {
+            if position_done || slash_seen {
+                return Err(InvalidValue);
+            }
+            position.push(word);
+            continue;
+        }
+        if !position.is_empty() {
+            position_done = true;
+        }
+        if image.is_none() {
+            if let Ok(SpecifiedValue::Value(value)) = parse_as("background-image", word) {
+                image = Some(value);
+                continue;
             }
         }
+        if parse_as("background-repeat", word).is_ok() {
+            if repeat.len() == 2 {
+                return Err(InvalidValue);
+            }
+            repeat.push(word);
+            continue;
+        }
+        if attachment.is_none() {
+            if let Some(value) = single_value(parse_as("background-attachment", word)) {
+                attachment = Some(value);
+                continue;
+            }
+        }
+        if parse_as("background-origin", word).is_ok() {
+            if boxes.len() == 2 {
+                return Err(InvalidValue);
+            }
+            boxes.push(word);
+            continue;
+        }
+        if color.is_none() && is_last {
+            if let Ok(SpecifiedValue::Value(value)) = parse_as("background-color", word) {
+                color = Some(value);
+                continue;
+            }
+        }
+        return Err(InvalidValue);
     }
-    let color = match color {
-        Some(part) => parse_as("background-color", part)?,
-        None => SpecifiedValue::Value(Initial::Transparent.to_value()),
+    if slash_seen && size.is_empty() {
+        return Err(InvalidValue);
+    }
+
+    let longhand = |name: &str, words: &[&[ComponentValue]]| -> Result<Value, InvalidValue> {
+        single_value(parse_as(name, &joined(words)?)).ok_or(InvalidValue)
     };
-    let image = image.unwrap_or(SpecifiedValue::Value(Initial::Keyword("none").to_value()));
-    Ok(vec![
-        ("background-image", image),
-        ("background-color", color),
-    ])
+    let position = if position.is_empty() {
+        Value::Raw("0% 0%".to_string())
+    } else {
+        longhand("background-position", &position)?
+    };
+    let size = if size.is_empty() {
+        Value::Keyword("auto")
+    } else {
+        longhand("background-size", &size)?
+    };
+    let repeat = if repeat.is_empty() {
+        Value::Keyword("repeat")
+    } else {
+        longhand("background-repeat", &repeat)?
+    };
+    let attachment = attachment.unwrap_or(Value::Keyword("scroll"));
+    let (origin, clip) = match boxes.as_slice() {
+        [] => (Value::Keyword("padding-box"), Value::Keyword("border-box")),
+        [one] => {
+            let one = longhand("background-origin", &[*one])?;
+            (one.clone(), one)
+        }
+        [origin, clip] => (
+            longhand("background-origin", &[*origin])?,
+            longhand("background-origin", &[*clip])?,
+        ),
+        _ => return Err(InvalidValue),
+    };
+    Ok(BackgroundLayer {
+        image: image.unwrap_or(Value::Keyword("none")),
+        position,
+        size,
+        repeat,
+        attachment,
+        origin,
+        clip,
+        color,
+    })
+}
+
+/// The one value of a single-item longhand, or `None`.
+fn single_value(result: Result<SpecifiedValue, InvalidValue>) -> Option<Value> {
+    match result {
+        Ok(SpecifiedValue::Value(Value::List(mut items))) if items.len() == 1 => items.pop(),
+        Ok(SpecifiedValue::Value(value)) => Some(value),
+        _ => None,
+    }
+}
+
+fn is_slash(v: &ComponentValue) -> bool {
+    v.is_token(&TokenKind::Delim('/'))
+}
+
+/// Whether a word is the single `/` of a layer.
+fn is_slash_word(word: &[ComponentValue]) -> bool {
+    matches!(word, [v] if is_slash(v))
+}
+
+/// The words of a layer: runs of components between spaces and `/`, with each
+/// `/` as a word of its own.
+fn layer_words(layer: &[ComponentValue]) -> Vec<&[ComponentValue]> {
+    let mut out = Vec::new();
+    let mut start = None;
+    for (i, v) in layer.iter().enumerate() {
+        if v.is_whitespace() || is_slash(v) {
+            if let Some(s) = start.take() {
+                out.push(&layer[s..i]);
+            }
+            if is_slash(v) {
+                out.push(&layer[i..=i]);
+            }
+        } else if start.is_none() {
+            start = Some(i);
+        }
+    }
+    if let Some(s) = start {
+        out.push(&layer[s..]);
+    }
+    out
+}
+
+/// The components of several words, joined by one space, so that a longhand can
+/// read them as one value. The text is tokenized again to get the components.
+fn joined(words: &[&[ComponentValue]]) -> Result<Vec<ComponentValue>, InvalidValue> {
+    let text = words
+        .iter()
+        .map(|w| crate::values::raw::serialize_components(w))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let tokenized = crate::syntax::tokenizer::tokenize(
+        crate::syntax::SourceId(0),
+        &text,
+        &crate::limits::ParseLimits::default(),
+    );
+    crate::syntax::component::build_component_values(&tokenized.tokens, 16)
+        .map_err(|_| InvalidValue)
 }
 
 fn margin_expand(v: &[ComponentValue]) -> Result<Expanded, InvalidValue> {
