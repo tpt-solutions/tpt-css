@@ -434,3 +434,215 @@ fn rounding_and_modulo_functions_match_their_definitions() {
         assert!(near, "hypot({a}, {c}) = {got:?}, want {want}");
     }
 }
+
+/// An environment with random viewport, root font size, color scheme, and hover.
+fn random_env(rng: &mut Rng) -> Environment {
+    let mut env = Environment::default();
+    env.viewport.width = [300.0, 500.0, 800.0][(rng.next() as usize) % 3];
+    env.root_font_size = [12.0, 16.0, 20.0][(rng.next() as usize) % 3];
+    env.media.prefers_dark = rng.next() % 2 == 0;
+    env.media.hover = rng.next() % 2 == 0;
+    env
+}
+
+#[test]
+fn environment_changes_match_a_full_resolve() {
+    // Media queries, viewport and relative units, the root font size, and the
+    // color scheme all change between restyles. Each restyle must match a full
+    // resolve in the same environment.
+    const DECLS: &[&str] = &[
+        "margin-left: 10vw",
+        "margin-left: 2em",
+        "margin-left: 1rem",
+        "color: light-dark(red, blue)",
+        "margin-left: 3px",
+        "font-size: 2em",
+        "width: 50%",
+        "padding-left: 1vmin",
+    ];
+    const WRAPS: &[(&str, &str)] = &[
+        ("", ""),
+        ("@media (min-width: 500px) {", "}"),
+        ("@media (prefers-color-scheme: dark) {", "}"),
+        ("@media (hover: hover) {", "}"),
+        ("@media (max-width: 300px) {", "}"),
+    ];
+    let mut rng = Rng(0x5EED_0005);
+    for case in 0..30 {
+        let (t, _) = random_tree(&mut rng);
+        let css: String = (0..6)
+            .map(|_| {
+                let (open, close) = WRAPS[(rng.next() as usize) % WRAPS.len()];
+                let decl = DECLS[(rng.next() as usize) % DECLS.len()];
+                format!("{open} {} {{ {decl} }} {close}", random_selector(&mut rng))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut resolver = StyleResolver::new(ResolverConfig::default());
+        resolver.add_stylesheet(parse_sheet(&css).stylesheet, Origin::Author);
+        let _ = resolver.resolve(&t, &random_env(&mut rng));
+        for step in 0..8 {
+            let env = random_env(&mut rng);
+            let restyled = resolver.restyle(&t, &env).clone();
+            let mut fresh = StyleResolver::new(ResolverConfig::default());
+            fresh.add_stylesheet(parse_sheet(&css).stylesheet, Origin::Author);
+            let full = fresh.resolve(&t, &env).clone();
+            assert_eq!(
+                restyled, full,
+                "case {case} step {step}: environment restyle diverged\n{css}"
+            );
+        }
+    }
+}
+
+#[test]
+fn border_radius_expands_to_the_four_corners_for_every_arity() {
+    use tpt_css::values::Value;
+    // CSS Backgrounds 3: one value sets all corners; two set top-left and
+    // bottom-right, then top-right and bottom-left; three set top-left, then
+    // top-right and bottom-left, then bottom-right; four set each corner.
+    const CORNERS: [&str; 4] = [
+        "border-top-left-radius",
+        "border-top-right-radius",
+        "border-bottom-right-radius",
+        "border-bottom-left-radius",
+    ];
+    let mut rng = Rng(0x5EED_0006);
+    for _ in 0..200 {
+        let n = 1 + (rng.next() % 4) as usize;
+        let values: Vec<f64> = (0..n).map(|_| (rng.next() % 40) as f64).collect();
+        let text = values
+            .iter()
+            .map(|v| format!("{v}px"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let pick = |tl: usize, tr: usize, br: usize, bl: usize| [tl, tr, br, bl].map(|i| values[i]);
+        let expected = match n {
+            1 => pick(0, 0, 0, 0),
+            2 => pick(0, 1, 0, 1),
+            3 => pick(0, 1, 2, 1),
+            _ => pick(0, 1, 2, 3),
+        };
+        let css = format!("child {{ border-radius: {text} }}");
+        for (corner, want) in CORNERS.iter().zip(expected) {
+            assert_eq!(
+                px_of(&css, corner),
+                Value::px(want),
+                "border-radius: {text} -> {corner}"
+            );
+        }
+    }
+}
+
+/// The six fuzz targets in `fuzz/fuzz_targets` (libFuzzer, Linux, nightly) run
+/// here as a seeded smoke test on stable Rust, so every platform runs them. It is
+/// not a coverage-guided fuzzer, but it exercises the same entry points.
+#[test]
+fn the_fuzz_target_bodies_do_not_panic_on_seeded_inputs() {
+    use tpt_css::parse_stylesheet;
+    use tpt_css::syntax::{tokenize, SourceId};
+    use tpt_css::ParseLimits;
+    let mut rng = Rng(0x5EED_F022);
+    let tokens = [
+        "calc(",
+        "min(",
+        "clamp(",
+        "var(",
+        "--a",
+        ":",
+        ";",
+        "{",
+        "}",
+        "(",
+        ")",
+        "[",
+        "]",
+        ",",
+        "/",
+        "*",
+        "1e3",
+        "-",
+        "+",
+        "%",
+        "px",
+        "deg",
+        "s",
+        "#fff",
+        "#ffff",
+        "rgb(",
+        "hsl(",
+        "color-mix(in ",
+        "oklch(",
+        "light-dark(",
+        "box-shadow: ",
+        "transform: ",
+        "font-variant: ",
+        "small-caps ",
+        "tabular-nums ",
+        "stylistic(a) ",
+        "transition: ",
+        "rotate(",
+        "translate(",
+        "inset ",
+        "red ",
+        "\"",
+        "\\",
+        "@media ",
+        "@supports ",
+        "@layer ",
+        ":has(",
+        ":is(",
+        "::before",
+        "&",
+        " ",
+        "\n",
+        "url(",
+        "image-set(",
+        "display-p3",
+        "rec2020",
+        " ",
+        "~",
+        ">",
+        "+",
+        "|",
+        "@scope ",
+        "to ",
+    ];
+    for case in 0..4000 {
+        // Raw bytes, as libFuzzer would give them. Only UTF-8 reaches the parsers.
+        let len = (rng.next() % 96) as usize;
+        let bytes: Vec<u8> = (0..len).map(|_| (rng.next() % 256) as u8).collect();
+        // Structured text, built from the tokens above.
+        let parts = (rng.next() % 24) as usize;
+        let mut text = String::new();
+        for _ in 0..parts {
+            text.push_str(rng.pick(&tokens));
+        }
+        for input in [String::from_utf8_lossy(&bytes).into_owned(), text.clone()] {
+            let _ = parse_declaration_list(
+                &format!("margin-left: calc({input})"),
+                ParseOptions::default(),
+            );
+            let _ = parse_declaration_list(&format!("color: {input}"), ParseOptions::default());
+            let _ = parse_declaration_list(&input, ParseOptions::default());
+            let _ =
+                parse_declaration_list(&format!("box-shadow: {input}"), ParseOptions::default());
+            let _ = parse_declaration_list(&format!("transform: {input}"), ParseOptions::default());
+            let _ =
+                parse_declaration_list(&format!("font-variant: {input}"), ParseOptions::default());
+            let _ = parse_stylesheet(&format!("{input} {{ }}"), ParseOptions::default());
+            let _ = parse_stylesheet(&input, ParseOptions::default());
+            let _ = tokenize(SourceId(0), &input, &ParseLimits::default());
+        }
+        if case % 500 == 0 {
+            // A stylesheet from the same material also goes through resolution.
+            let mut resolver = StyleResolver::new(ResolverConfig::default());
+            resolver.add_stylesheet(
+                parse_stylesheet(&text, ParseOptions::default()).stylesheet,
+                Origin::Author,
+            );
+            let t = TestTree::new(NodeKind::Element);
+            let _ = resolver.resolve(&t, &Environment::default());
+        }
+    }
+}

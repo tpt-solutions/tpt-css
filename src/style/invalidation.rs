@@ -4,8 +4,9 @@
 //! Invalidation and incremental restyle (spec 8.2, 17).
 //!
 //! This is the M1 foundation. It covers attribute, state, and inline-style
-//! changes, which restyle the changed element and its subtree. Stylesheet
-//! changes, environment changes, and tree-shape changes restyle everything.
+//! changes, which restyle the changed element and its subtree. Environment
+//! changes restyle the elements that the change can reach (see
+//! `mark_env_change`). Stylesheet and tree-shape changes restyle everything.
 //!
 //! Sibling-sensitive rules are handled conservatively. If any rule depends on
 //! sibling structure (`+`, `~`, `:nth-*`, `:empty`), a change also restyles the
@@ -139,21 +140,17 @@ impl StyleResolver {
     /// Recomputes the styles affected since the last resolve or restyle (spec 8.2).
     ///
     /// Falls back to a full [`StyleResolver::resolve`] when there is no previous
-    /// result, when the environment changed, or after a sheet or tree change.
-    /// Otherwise only the dirty subtrees are recomputed, and everything else is
-    /// reused from the previous result.
+    /// result, after a sheet or tree change, or when an environment change cannot
+    /// be marked locally (see `mark_env_change`). Otherwise only the dirty subtrees
+    /// are recomputed, and everything else is reused from the previous result.
     pub fn restyle<T: StyleTree>(&mut self, tree: &T, env: &Environment) -> &StyleMap {
         let reusable = match &self.cache {
             // Counters depend on earlier nodes, so a local restyle cannot compute them.
-            Some(cache) => {
-                cache.env == *env
-                    && !self.full_dirty
-                    && self.containers.is_none()
-                    && !self.counters_used()
-            }
+            Some(_) => !self.full_dirty && self.containers.is_none() && !self.counters_used(),
             None => false,
         };
-        if !reusable {
+        let env_changed = self.cache.as_ref().is_some_and(|c| c.env != *env);
+        if !reusable || (env_changed && !self.mark_env_change(tree, env)) {
             self.resolve(tree, env);
             return self.cached_map();
         }
@@ -190,6 +187,64 @@ impl StyleResolver {
 
         self.cache = Some(crate::style::resolver::Cache { map, env: *env });
         self.cached_map()
+    }
+
+    /// Marks the elements that an environment change can affect, and returns
+    /// `true`. Returns `false` when only a full resolve is correct.
+    ///
+    /// A rule's declarations depend on the environment through the viewport, the
+    /// root font size, the color scheme (`EnvReads`), and through which media
+    /// queries hold. So a change restyles the elements matched by a rule that
+    /// stopped or started to hold, or that reads an input that changed. Everything
+    /// else keeps its computed styles, and descendants of a marked element are
+    /// recomputed by the restyle that follows.
+    ///
+    /// A full resolve is used for shadow trees, which are not walked here, and for
+    /// rules with `@container` conditions, which depend on the containers.
+    pub(crate) fn mark_env_change<T: StyleTree>(&mut self, tree: &T, env: &Environment) -> bool {
+        let Some(old) = self.cache.as_ref().map(|c| c.env) else {
+            return false;
+        };
+        if self.shadow_aware {
+            return false;
+        }
+        let old_active = self.active_rules(&old);
+        let new_active = self.active_rules(env);
+        let viewport = old.viewport != env.viewport;
+        let rem = old.root_font_size != env.root_font_size;
+        let dark = old.media.prefers_dark != env.media.prefers_dark;
+
+        let mut affected = Vec::new();
+        for (s, sheet) in self.sheets.iter().enumerate() {
+            for (r, rule) in sheet.rules.iter().enumerate() {
+                let flipped = old_active[s][r] != new_active[s][r];
+                let reads = (viewport && rule.env_reads.viewport)
+                    || (rem && rule.env_reads.rem)
+                    || (dark && rule.env_reads.dark);
+                if flipped || reads {
+                    if !rule.containers.is_empty() {
+                        return false;
+                    }
+                    affected.push((s, r));
+                }
+            }
+        }
+        if affected.is_empty() {
+            return true;
+        }
+
+        let mut stack = vec![tree.root()];
+        while let Some(node) = stack.pop() {
+            if tree.kind(node) == NodeKind::Element
+                && affected
+                    .iter()
+                    .any(|&(s, r)| self.rule_applies_to(tree, node, s, r))
+            {
+                self.dirty.insert(node);
+            }
+            stack.extend_from_slice(tree.children(node));
+        }
+        true
     }
 
     /// The map held by the cache. Every path that fills the cache leaves it set.

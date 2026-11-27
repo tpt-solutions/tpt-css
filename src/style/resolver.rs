@@ -45,7 +45,7 @@ use crate::syntax::{trim_whitespace, ComponentValue, TokenKind};
 use crate::tree::scope::shadow_root_of;
 use crate::tree::Attributes;
 use crate::tree::{NodeId, NodeKind, StyleTree};
-use crate::values::{Color, ContentItem, Value};
+use crate::values::{Color, ContentItem, LengthUnit, Value};
 
 /// Identifies a stylesheet added to a resolver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -143,6 +143,111 @@ pub(crate) struct CompiledRule {
     /// True if a selector uses `:has()`, `:scope`, or `@scope`. Such a rule can
     /// depend on elements outside the subject, so a change may affect any ancestor.
     pub needs_ancestors: bool,
+    /// The environment inputs that the declarations read (see `EnvReads`).
+    pub env_reads: EnvReads,
+}
+
+/// The environment inputs that a rule's declarations read, beyond which rules
+/// apply. A rule that reads none of them keeps its computed styles when only
+/// those inputs change (see `StyleResolver::mark_env_change`).
+///
+/// Units that depend on the viewport (`vw`, `vh`, `vmin`, `vmax`, and the
+/// container units, which fall back to it) set `viewport`. `em`, `rem`, and
+/// percentages set `rem`, because the root's font size is their base for the
+/// root element. `light-dark()` sets `dark`. A `calc()`, a pass-through value,
+/// or a `var()` could read any of them, so it sets all three.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct EnvReads {
+    pub viewport: bool,
+    pub rem: bool,
+    pub dark: bool,
+}
+
+impl EnvReads {
+    const ALL: EnvReads = EnvReads {
+        viewport: true,
+        rem: true,
+        dark: true,
+    };
+
+    fn union(self, other: EnvReads) -> EnvReads {
+        EnvReads {
+            viewport: self.viewport || other.viewport,
+            rem: self.rem || other.rem,
+            dark: self.dark || other.dark,
+        }
+    }
+
+    /// The inputs read by a rule's declarations.
+    pub(crate) fn of_decls(decls: &[CompiledDecl]) -> EnvReads {
+        decls.iter().fold(EnvReads::default(), |acc, d| {
+            acc.union(of_spec_value(&d.value))
+        })
+    }
+}
+
+fn of_spec_value(value: &SpecifiedValue) -> EnvReads {
+    match value {
+        SpecifiedValue::CssWide(_) => EnvReads::default(),
+        SpecifiedValue::Value(v) => of_value(v),
+        SpecifiedValue::Unparsed { .. } => EnvReads::ALL,
+    }
+}
+
+fn of_value(value: &Value) -> EnvReads {
+    let viewport = EnvReads {
+        viewport: true,
+        ..EnvReads::default()
+    };
+    let rem = EnvReads {
+        rem: true,
+        ..EnvReads::default()
+    };
+    match value {
+        Value::Length { unit, .. } => match unit {
+            LengthUnit::Em | LengthUnit::Rem => rem,
+            LengthUnit::Vw
+            | LengthUnit::Vh
+            | LengthUnit::Vmin
+            | LengthUnit::Vmax
+            | LengthUnit::Cqw
+            | LengthUnit::Cqh
+            | LengthUnit::Cqi
+            | LengthUnit::Cqb
+            | LengthUnit::Cqmin
+            | LengthUnit::Cqmax => viewport,
+            _ => EnvReads::default(),
+        },
+        Value::Percentage(_) => rem,
+        Value::LightDark(..) => EnvReads {
+            dark: true,
+            ..EnvReads::default()
+        },
+        Value::Calc(_) | Value::Raw(_) => EnvReads::ALL,
+        Value::Elliptical {
+            horizontal,
+            vertical,
+        } => of_value(horizontal).union(of_value(vertical)),
+        Value::List(items) => items
+            .iter()
+            .fold(EnvReads::default(), |acc, v| acc.union(of_value(v))),
+        Value::Shadows(shadows) => shadows.iter().fold(EnvReads::default(), |acc, s| {
+            [
+                Some(&s.x),
+                Some(&s.y),
+                s.blur.as_ref(),
+                s.spread.as_ref(),
+                s.color.as_ref(),
+            ]
+            .into_iter()
+            .flatten()
+            .fold(acc, |acc, v| acc.union(of_value(v)))
+        }),
+        Value::Transforms(functions) => functions.iter().fold(EnvReads::default(), |acc, f| {
+            f.args.iter().fold(acc, |acc, v| acc.union(of_value(v)))
+        }),
+        _ => EnvReads::default(),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -422,6 +527,56 @@ impl StyleResolver {
         self.cached_map()
     }
 
+    /// Whether one of rule `rule_idx` of sheet `sheet_pos` selects `node`. This
+    /// makes the same checks as `cascade`, for one rule and without the
+    /// declarations, so it can find the elements an environment change reaches.
+    pub(crate) fn rule_applies_to<T: StyleTree>(
+        &self,
+        tree: &T,
+        node: NodeId,
+        sheet_pos: usize,
+        rule_idx: usize,
+    ) -> bool {
+        let sheet = &self.sheets[sheet_pos];
+        let rule = &sheet.rules[rule_idx];
+        let max_steps = self.config.limits.max_match_steps;
+        let node_root = if self.shadow_aware {
+            shadow_root_of(tree, node)
+        } else {
+            None
+        };
+        rule.selectors
+            .selectors
+            .iter()
+            .enumerate()
+            .any(|(sel_idx, selector)| {
+                let Some(scope) = scope_for(tree, node, &rule.scopes, max_steps) else {
+                    return false;
+                };
+                let in_scope = match sheet.scope {
+                    Some(root) => {
+                        node_root == Some(root)
+                            || tree.shadow(root).host == Some(node)
+                            || matches!(selector.pseudo_element, Some(PseudoElement::Slotted))
+                    }
+                    None => {
+                        node_root.is_none()
+                            || matches!(selector.pseudo_element, Some(PseudoElement::Part(_)))
+                    }
+                };
+                if !in_scope {
+                    return false;
+                }
+                let uses_visited = rule.visited.get(sel_idx).copied().unwrap_or(false);
+                if uses_visited && self.config.visited == VisitedPolicy::Disabled {
+                    return false;
+                }
+                let mut matcher =
+                    Matcher::cached(tree, max_steps, scope, &self.siblings).in_shadow(sheet.scope);
+                matcher.matches(node, selector)
+            })
+    }
+
     /// Whether each rule's media conditions hold in `env`, indexed by sheet, then rule.
     pub(crate) fn active_rules(&self, env: &Environment) -> Vec<Vec<bool>> {
         self.sheets
@@ -659,7 +814,7 @@ impl StyleResolver {
         for rule in rules {
             match rule {
                 Rule::Style(style) => {
-                    let decls = style
+                    let decls: Vec<CompiledDecl> = style
                         .declarations
                         .declarations
                         .iter()
@@ -678,12 +833,14 @@ impl StyleResolver {
                             .selectors
                             .iter()
                             .any(selector_needs_ancestors);
+                    let env_reads = EnvReads::of_decls(&decls);
                     out.push(CompiledRule {
                         selectors: style.selectors,
                         decls,
                         conditions: ctx.conditions.clone(),
                         scopes: ctx.scopes.clone(),
                         needs_ancestors,
+                        env_reads,
                         containers: ctx.containers.clone(),
                         layer: ctx.layer,
                         visited,

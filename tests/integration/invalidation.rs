@@ -109,7 +109,7 @@ fn sibling_sensitive_rules_restyle_the_parent_subtree() {
 }
 
 #[test]
-fn an_environment_change_forces_a_full_resolve() {
+fn an_environment_change_restyles_what_its_media_queries_reach() {
     let css = "@media (min-width: 500px) { div { margin-left: 3px } }";
     let (t, divs) = big_tree();
     let wide = Environment::default();
@@ -398,4 +398,102 @@ fn nth_child_of_s_uses_positions_among_matching_siblings() {
         tpt_css::values::Value::px(0.0)
     );
     assert_eq!(map, full(css, &t, &env));
+}
+
+#[test]
+fn a_media_flip_restyles_only_the_elements_its_rule_matches() {
+    // Only `.hot` and its three-element subtree (div, span, em) are reached.
+    let css = "@media (min-width: 500px) { .hot { margin-left: 3px } }";
+    let (mut t, divs) = big_tree();
+    t.add_class(divs[4], "hot");
+    let wide = Environment::default();
+    let narrow = Environment {
+        viewport: tpt_css::ViewportInfo {
+            width: 300.0,
+            height: 600.0,
+        },
+        ..Environment::default()
+    };
+    let mut r = resolver_for(css);
+    let _ = r.resolve(&t, &wide);
+    let map = r.restyle(&t, &narrow).clone();
+    // The subtree is recomputed, but the equality cutoff stops below the first
+    // element whose style is unchanged, so far fewer than the 151 elements.
+    assert!(r.last_restyle_count() <= 3, "{}", r.last_restyle_count());
+    assert_eq!(map, full(css, &t, &narrow));
+}
+
+#[test]
+fn a_viewport_change_restyles_nothing_when_no_rule_reads_the_viewport() {
+    let css = ".hot { color: red } div { margin-left: 1px }";
+    let (t, _) = big_tree();
+    let wide = Environment::default();
+    let narrow = Environment {
+        viewport: tpt_css::ViewportInfo {
+            width: 300.0,
+            height: 600.0,
+        },
+        ..Environment::default()
+    };
+    let mut r = resolver_for(css);
+    let _ = r.resolve(&t, &wide);
+    let map = r.restyle(&t, &narrow).clone();
+    assert_eq!(r.last_restyle_count(), 0);
+    assert_eq!(map, full(css, &t, &narrow));
+}
+
+#[test]
+fn a_viewport_change_restyles_the_rules_that_use_viewport_units() {
+    let css = "div { margin-left: 10vw } span { color: red }";
+    let (t, divs) = big_tree();
+    let wide = Environment::default();
+    let narrow = Environment {
+        viewport: tpt_css::ViewportInfo {
+            width: 300.0,
+            height: 600.0,
+        },
+        ..Environment::default()
+    };
+    let mut r = resolver_for(css);
+    let _ = r.resolve(&t, &wide);
+    let margin = lookup("margin-left").unwrap();
+    let map = r.restyle(&t, &narrow).clone();
+    assert_eq!(map.get(divs[0]).unwrap().raw(margin), &Value::px(30.0));
+    assert_eq!(map, full(css, &t, &narrow));
+}
+
+#[test]
+fn a_color_scheme_change_restyles_the_rules_that_use_light_dark() {
+    let css = "span { color: light-dark(red, blue) } div { margin-left: 1px }";
+    let (t, _) = big_tree();
+    let light = Environment::default();
+    let mut dark = Environment::default();
+    dark.media.prefers_dark = true;
+    let mut r = resolver_for(css);
+    let _ = r.resolve(&t, &light);
+    let map = r.restyle(&t, &dark).clone();
+    assert_eq!(map, full(css, &t, &dark));
+    // The spans and the ems below them change; the divs do not.
+    assert_eq!(r.last_restyle_count(), 100);
+}
+
+#[test]
+fn a_root_font_size_change_restyles_the_rules_that_use_relative_lengths() {
+    // The root element's font size is `2em` of the environment's root font size,
+    // which is 40px. `rem` is that computed size of the root element, so `1rem`
+    // is 40px too.
+    let css = "root { font-size: 2em } div { margin-left: 1rem }";
+    let (t, divs) = big_tree();
+    let base = Environment::default();
+    let big = Environment {
+        root_font_size: 20.0,
+        ..Environment::default()
+    };
+    let mut r = resolver_for(css);
+    let _ = r.resolve(&t, &base);
+    let map = r.restyle(&t, &big).clone();
+    assert_eq!(map, full(css, &t, &big));
+    let margin = lookup("margin-left").unwrap();
+    assert_eq!(map.get(divs[0]).unwrap().raw(margin), &Value::px(40.0));
+    assert_eq!(map.get(t.root()).unwrap().font_size(), 40.0);
 }
