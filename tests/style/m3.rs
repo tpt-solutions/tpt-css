@@ -275,7 +275,7 @@ fn color_mix_in_srgb_with_defaults_and_weights() {
 #[test]
 fn color_mix_in_an_unsupported_space_is_dropped() {
     let (t, _, child) = chain();
-    let map = style_with("child { color: color-mix(in display-p3, red, blue) }", &t);
+    let map = style_with("child { color: color-mix(in jzazbz, red, blue) }", &t);
     assert_eq!(style_of(&map, child).color(), Color::BLACK);
 }
 
@@ -696,6 +696,14 @@ fn malformed_relative_colors_are_dropped() {
 
 // ---- color-mix() in more spaces and relative color() -------------------------------
 
+/// Mixing two neutral grays in Display P3 keeps them neutral, because white
+/// and black have the same chromaticity in every RGB space.
+#[test]
+fn display_p3_keeps_neutral_grays_neutral() {
+    let c = color_of("p { color: color-mix(in display-p3, black, white) }");
+    assert!(approx(c, [0.5, 0.5, 0.5], 0.01), "{c:?}");
+}
+
 #[test]
 fn mixing_a_color_with_itself_gives_it_back_in_every_space() {
     for space in [
@@ -709,6 +717,10 @@ fn mixing_a_color_with_itself_gives_it_back_in_every_space() {
         "lch",
         "oklab",
         "oklch",
+        "display-p3",
+        "rec2020",
+        "a98-rgb",
+        "prophoto-rgb",
     ] {
         for origin in ["#3a7fc2", "#ff8000", "#808080", "#102030"] {
             let css = format!("p {{ color: color-mix(in {space}, {origin} 50%, {origin}) }}");
@@ -821,7 +833,7 @@ fn malformed_mixes_are_dropped() {
         initial
     );
     assert_eq!(
-        color_of("p { color: color-mix(in display-p3, red, blue) }"),
+        color_of("p { color: color-mix(in jzazbz, red, blue) }"),
         initial
     );
 }
@@ -1618,4 +1630,33 @@ fn nth_of_type_counts_only_siblings_of_the_same_name() {
     ));
     // `b ~ span` needs an earlier `b` sibling, and there is none.
     assert_eq!(style_of(&map, b).color(), Color::BLACK);
+}
+
+#[test]
+fn wide_gamut_spaces_keep_neutral_grays_neutral() {
+    for space in ["display-p3", "rec2020", "a98-rgb", "prophoto-rgb"] {
+        let c = color_of(&format!(
+            "p {{ color: color-mix(in {space}, black, white) }}"
+        ));
+        let [r, g, b] = [c.components[0], c.components[1], c.components[2]];
+        assert!(
+            (r - g).abs() < 0.01 && (g - b).abs() < 0.01,
+            "{space} gray {c:?}"
+        );
+    }
+}
+
+#[test]
+fn color_function_accepts_the_wide_gamut_spaces() {
+    // White is white in every space, and its channels are 1 in each.
+    for space in ["display-p3", "rec2020", "prophoto-rgb"] {
+        let c = color_of(&format!("p {{ color: color({space} 1 1 1) }}"));
+        assert!(approx(c, [1.0, 1.0, 1.0], 0.001), "{space} white {c:?}");
+    }
+    // Display P3 red is outside sRGB. Its sRGB part is clipped to red.
+    let red = color_of("p { color: color(display-p3 1 0 0) }");
+    assert!(approx(red, [1.0, 0.0, 0.0], 0.001), "{red:?}");
+    // A98 black stays black.
+    let black = color_of("p { color: color(a98-rgb 0 0 0) }");
+    assert!(approx(black, [0.0, 0.0, 0.0], 0.001), "{black:?}");
 }

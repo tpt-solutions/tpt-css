@@ -595,6 +595,10 @@ fn parse_color_function(args: &[ComponentValue]) -> Option<Color> {
         scaled(c[1], 1.0)?.clamp(0.0, 1.0),
         scaled(c[2], 1.0)?.clamp(0.0, 1.0),
     ];
+    if let Some(w) = WideSpace::of(&space) {
+        let alpha = alpha_of(alpha.and_then(as_arg));
+        return Some(color_from_linear(w.to_srgb_linear(channels), alpha));
+    }
     let srgb = match space.as_str() {
         "srgb" => channels,
         "srgb-linear" => channels.map(encode_srgb),
@@ -1142,11 +1146,147 @@ fn parse_relative(name: &str, args: &[ComponentValue]) -> Option<Color> {
 
 // ---- color-mix() and relative color() ----------------------------------------------
 
+/// A wide-gamut RGB space that CSS Color 4 defines beside sRGB (section 10).
+/// Channels are gamma-encoded, and `to_xyz` maps linear light to XYZ. Display P3,
+/// Rec. 2020, and A98 RGB use the D65 white point. ProPhoto RGB uses D50.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WideSpace {
+    DisplayP3,
+    Rec2020,
+    A98Rgb,
+    ProPhotoRgb,
+}
+
+/// Linear Rec. 2020 to XYZ (D65), from the primaries (CSS Color 4).
+const REC2020_TO_XYZ_D65: [[f64; 3]; 3] = [
+    [0.636_958_048_3, 0.144_616_903_6, 0.168_880_975_2],
+    [0.262_700_212_0, 0.677_998_071_5, 0.059_301_716_5],
+    [0.0, 0.028_072_693_0, 1.060_985_057_7],
+];
+
+/// Linear A98 RGB to XYZ (D65).
+const A98_TO_XYZ_D65: [[f64; 3]; 3] = [
+    [0.576_669_042_9, 0.185_558_237_9, 0.188_228_646_2],
+    [0.297_344_925_9, 0.627_363_566_3, 0.075_291_458_5],
+    [0.027_031_361_4, 0.070_688_852_5, 0.991_337_536_8],
+];
+
+/// Linear ProPhoto RGB to XYZ (D50).
+const PROPHOTO_TO_XYZ_D50: [[f64; 3]; 3] = [
+    [0.797_760_489_6, 0.135_191_708_2, 0.031_349_349_5],
+    [0.288_071_128_2, 0.711_843_217_8, 0.000_085_654_0],
+    [0.0, 0.0, 0.825_104_602_5],
+];
+
+const REC2020_ALPHA: f64 = 1.099_296_826_809_44;
+const REC2020_BETA: f64 = 0.018_053_968_510_807;
+
+/// Applies `f` to the magnitude of `v`, keeping its sign. The transfer
+/// functions of these spaces are odd functions.
+fn signed(v: f64, f: impl Fn(f64) -> f64) -> f64 {
+    if v < 0.0 {
+        -f(-v)
+    } else {
+        f(v)
+    }
+}
+
+impl WideSpace {
+    /// The space named by a `color()` or `color-mix()` identifier.
+    fn of(name: &str) -> Option<WideSpace> {
+        Some(match name {
+            "display-p3" => WideSpace::DisplayP3,
+            "rec2020" => WideSpace::Rec2020,
+            "a98-rgb" => WideSpace::A98Rgb,
+            "prophoto-rgb" => WideSpace::ProPhotoRgb,
+            _ => return None,
+        })
+    }
+
+    /// Whether the space's white point is D50, so its XYZ goes through the D50 path.
+    fn d50(self) -> bool {
+        self == WideSpace::ProPhotoRgb
+    }
+
+    /// Linear light to XYZ, in this space's white point.
+    fn to_xyz(self) -> [[f64; 3]; 3] {
+        match self {
+            WideSpace::DisplayP3 => DISPLAY_P3_TO_XYZ_D65,
+            WideSpace::Rec2020 => REC2020_TO_XYZ_D65,
+            WideSpace::A98Rgb => A98_TO_XYZ_D65,
+            WideSpace::ProPhotoRgb => PROPHOTO_TO_XYZ_D50,
+        }
+    }
+
+    /// Gamma-encoded value to linear light.
+    fn decode(self, v: f64) -> f64 {
+        match self {
+            WideSpace::DisplayP3 => linearize(v),
+            WideSpace::Rec2020 => signed(v, |a| {
+                if a < 4.5 * REC2020_BETA {
+                    a / 4.5
+                } else {
+                    ((a + REC2020_ALPHA - 1.0) / REC2020_ALPHA).powf(1.0 / 0.45)
+                }
+            }),
+            WideSpace::A98Rgb => signed(v, |a| a.powf(563.0 / 256.0)),
+            WideSpace::ProPhotoRgb => signed(v, |a| {
+                if a < 16.0 / 512.0 {
+                    a / 16.0
+                } else {
+                    a.powf(1.8)
+                }
+            }),
+        }
+    }
+
+    /// Linear light to gamma-encoded value.
+    fn encode(self, l: f64) -> f64 {
+        match self {
+            WideSpace::DisplayP3 => encode_srgb(l),
+            WideSpace::Rec2020 => signed(l, |a| {
+                if a < REC2020_BETA {
+                    4.5 * a
+                } else {
+                    REC2020_ALPHA * a.powf(0.45) - (REC2020_ALPHA - 1.0)
+                }
+            }),
+            WideSpace::A98Rgb => signed(l, |a| a.powf(256.0 / 563.0)),
+            WideSpace::ProPhotoRgb => signed(l, |a| {
+                if a < 1.0 / 512.0 {
+                    16.0 * a
+                } else {
+                    a.powf(1.0 / 1.8)
+                }
+            }),
+        }
+    }
+
+    /// The gamma-encoded channels of an sRGB color in this space.
+    fn encode_from_srgb(self, color: Color) -> [f64; 3] {
+        let xyz = linear_to_xyz(
+            color.components.map(|c| linearize(f64::from(c))),
+            self.d50(),
+        );
+        mat_vec(invert3(self.to_xyz()), xyz).map(|l| self.encode(l))
+    }
+
+    /// The linear sRGB light of gamma-encoded channels in this space. It may be
+    /// outside sRGB, and the caller clamps it.
+    fn to_srgb_linear(self, channels: [f64; 3]) -> [f64; 3] {
+        let xyz = mat_vec(self.to_xyz(), channels.map(|c| self.decode(c)));
+        xyz_to_linear(xyz, self.d50())
+    }
+}
+
 /// The spaces that `color-mix()` and relative `color()` can work in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MixSpace {
     Srgb,
     SrgbLinear,
+    /// A wide-gamut RGB space, mixed in its gamma-encoded values (CSS Color 4).
+    /// The result is converted back to sRGB, so colors outside sRGB are clipped.
+    Wide(WideSpace),
     Xyz65,
     Xyz50,
     Model(Space),
@@ -1165,7 +1305,7 @@ impl MixSpace {
             "lch" => MixSpace::Model(Space::Lch),
             "oklab" => MixSpace::Model(Space::Oklab),
             "oklch" => MixSpace::Model(Space::Oklch),
-            _ => return None,
+            _ => return WideSpace::of(name).map(MixSpace::Wide),
         })
     }
 
@@ -1183,6 +1323,8 @@ impl MixSpace {
         match self {
             MixSpace::Srgb => color.components.map(f64::from),
             MixSpace::SrgbLinear => color.components.map(|c| linearize(f64::from(c))),
+            MixSpace::Wide(w) => w.encode_from_srgb(color),
+
             MixSpace::Xyz65 => {
                 linear_to_xyz(color.components.map(|c| linearize(f64::from(c))), false)
             }
@@ -1203,6 +1345,8 @@ impl MixSpace {
                 alpha: alpha32,
             },
             MixSpace::SrgbLinear => color_from_linear(ch.map(|c| c.clamp(0.0, 1.0)), alpha32),
+            MixSpace::Wide(w) => color_from_linear(w.to_srgb_linear(ch), alpha32),
+
             MixSpace::Xyz65 => color_from_linear(xyz_to_linear(ch, false), alpha32),
             MixSpace::Xyz50 => color_from_linear(xyz_to_linear(ch, true), alpha32),
             MixSpace::Model(space) => color_from_channels(space, ch, alpha),
@@ -1362,6 +1506,13 @@ fn parse_relative_color_function(args: &[ComponentValue]) -> Option<Color> {
 // ---- XYZ color spaces (CSS Color 4 section 10.3) -----------------------------------
 
 /// Linear sRGB to XYZ with the D65 white point (the standard sRGB matrix).
+/// Linear Display P3 to XYZ with the D65 white point (CSS Color 4).
+const DISPLAY_P3_TO_XYZ_D65: [[f64; 3]; 3] = [
+    [0.486_570_948_6, 0.265_667_693_2, 0.198_217_285_2],
+    [0.228_974_564_1, 0.691_738_521_8, 0.079_286_914_1],
+    [0.0, 0.045_113_381_9, 1.043_944_368_9],
+];
+
 const SRGB_TO_XYZ_D65: [[f64; 3]; 3] = [
     [0.412_390_799_3, 0.357_584_339_4, 0.180_480_788_4],
     [0.212_639_005_9, 0.715_168_678_8, 0.072_192_315_4],
