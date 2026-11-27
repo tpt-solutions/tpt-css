@@ -344,3 +344,93 @@ fn calc_and_min_max_clamp_agree_with_their_definitions() {
         assert_eq!(clamp, Value::px(a.max(b.min(c))), "clamp({a}, {b}, {c})");
     }
 }
+
+#[test]
+fn padding_shorthand_expands_to_the_four_sides_for_every_arity() {
+    use tpt_css::values::Value;
+    // Same arity rules as margin (CSS Box 4), checked for padding.
+    const SIDES: [&str; 4] = [
+        "padding-top",
+        "padding-right",
+        "padding-bottom",
+        "padding-left",
+    ];
+    let mut rng = Rng(0x5EED_0003);
+    for _ in 0..200 {
+        let n = 1 + (rng.next() % 4) as usize;
+        let values: Vec<f64> = (0..n).map(|_| (rng.next() % 40) as f64).collect();
+        let text = values
+            .iter()
+            .map(|v| format!("{v}px"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let pick = |top: usize, right: usize, bottom: usize, left: usize| {
+            [top, right, bottom, left].map(|i| values[i])
+        };
+        let expected = match n {
+            1 => pick(0, 0, 0, 0),
+            2 => pick(0, 1, 0, 1),
+            3 => pick(0, 1, 2, 1),
+            _ => pick(0, 1, 2, 3),
+        };
+        let css = format!("child {{ padding: {text} }}");
+        for (side, want) in SIDES.iter().zip(expected) {
+            assert_eq!(
+                px_of(&css, side),
+                Value::px(want),
+                "padding: {text} -> {side}"
+            );
+        }
+    }
+}
+
+/// The number of a computed length in px, if it is one.
+fn px_number(value: &tpt_css::values::Value) -> Option<f64> {
+    match value {
+        tpt_css::values::Value::Length { value, .. } => Some(*value),
+        _ => None,
+    }
+}
+
+#[test]
+fn rounding_and_modulo_functions_match_their_definitions() {
+    use tpt_css::values::Value;
+    let mut rng = Rng(0x5EED_0004);
+    for _ in 0..200 {
+        // Integers keep every result exact, so the checks compare with ==.
+        let a = (rng.next() % 101) as f64 - 50.0;
+        let mut b = (rng.next() % 24) as f64 - 12.0;
+        if b == 0.0 {
+            b = 7.0;
+        }
+        // round(nearest, a, b) rounds halfway toward +infinity (CSS Values 4).
+        let nearest = (a / b + 0.5).floor() * b;
+        let got = px_of(
+            &format!("child {{ margin-left: round(nearest, {a}px, {b}px) }}"),
+            "margin-left",
+        );
+        assert_eq!(got, Value::px(nearest), "round(nearest, {a}, {b})");
+        // mod(a, b) has the sign of b; rem(a, b) has the sign of a.
+        let modulo = a - b * (a / b).floor();
+        let got = px_of(
+            &format!("child {{ margin-left: mod({a}px, {b}px) }}"),
+            "margin-left",
+        );
+        assert_eq!(got, Value::px(modulo), "mod({a}, {b})");
+        let remainder = a % b;
+        let got = px_of(
+            &format!("child {{ margin-left: rem({a}px, {b}px) }}"),
+            "margin-left",
+        );
+        assert_eq!(got, Value::px(remainder), "rem({a}, {b})");
+        // hypot(a, b) is the Euclidean length, within float error.
+        let c = (rng.next() % 61) as f64 - 30.0;
+        let got = px_of(
+            &format!("child {{ margin-left: hypot({a}px, {c}px) }}"),
+            "margin-left",
+        );
+        let want = (a * a + c * c).sqrt();
+        let near = px_number(&got).is_some_and(|v| (v - want).abs() < 1e-9);
+        assert!(near, "hypot({a}, {c}) = {got:?}, want {want}");
+    }
+}
