@@ -195,6 +195,12 @@ pub const SHORTHANDS: &[ShorthandSpec] = &[
             "font-weight",
             "font-stretch",
             "font-variant-caps",
+            "font-variant-ligatures",
+            "font-variant-numeric",
+            "font-variant-east-asian",
+            "font-variant-position",
+            "font-variant-emoji",
+            "font-variant-alternates",
             "font-size",
             "line-height",
             "font-family",
@@ -219,27 +225,85 @@ pub const SHORTHANDS: &[ShorthandSpec] = &[
     },
     ShorthandSpec {
         name: "font-variant",
-        longhands: &["font-variant-caps"],
+        longhands: &VARIANT_LONGHANDS,
         expand: font_variant,
     },
 ];
 
-/// `font-variant`, for the one longhand this engine has, `font-variant-caps`
-/// (CSS Fonts 4 section 6). `none` means `normal`. The other sub-values of the
-/// full shorthand (ligatures, numeric, and the rest) are not supported, so a
-/// value that names one of them is invalid and the declaration is dropped.
+/// The longhands of `font-variant`, in the order the shorthand lists them.
+const VARIANT_LONGHANDS: [&str; 7] = [
+    "font-variant-caps",
+    "font-variant-ligatures",
+    "font-variant-numeric",
+    "font-variant-east-asian",
+    "font-variant-position",
+    "font-variant-emoji",
+    "font-variant-alternates",
+];
+
+/// `font-variant` (CSS Fonts 4 section 6.1). Each keyword goes to the longhand that
+/// accepts it, and the longhands with keywords are parsed from those keywords.
+/// `none` sets ligatures to `none`, and the other longhands to `normal`. `normal`
+/// sets every longhand to `normal`. Alternates (`font-variant-alternates`, which
+/// takes functions) is not supported, so a value that names it is invalid.
 fn font_variant(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> {
     let parts = chunks(values);
-    let [part] = parts.as_slice() else {
+    if parts.is_empty() {
         return Err(InvalidValue);
+    }
+    let all_initial = |ligatures: SpecifiedValue| -> Expanded {
+        VARIANT_LONGHANDS
+            .iter()
+            .map(|&name| {
+                if name == "font-variant-ligatures" {
+                    (name, ligatures.clone())
+                } else {
+                    (name, initial_value(name))
+                }
+            })
+            .collect()
     };
-    let caps = match part {
-        [ComponentValue::Token(t)] if matches!(&t.kind, TokenKind::Ident(w) if w.eq_ignore_ascii_case("none")) => {
-            initial_value("font-variant-caps")
+    if let [part] = parts.as_slice() {
+        if chunks_is_none(part) {
+            return Ok(all_initial(parse_as("font-variant-ligatures", part)?));
         }
-        _ => parse_as("font-variant-caps", part)?,
-    };
-    Ok(vec![("font-variant-caps", caps)])
+        if let [ComponentValue::Token(t)] = part {
+            if matches!(&t.kind, TokenKind::Ident(w) if w.eq_ignore_ascii_case("normal")) {
+                return Ok(all_initial(initial_value("font-variant-ligatures")));
+            }
+        }
+    }
+
+    // Sort the keywords by longhand, keeping their order.
+    let tokens: Vec<ComponentValue> = values
+        .iter()
+        .filter(|v| !v.is_whitespace())
+        .cloned()
+        .collect();
+    let mut groups: Vec<Vec<ComponentValue>> = vec![Vec::new(); VARIANT_LONGHANDS.len()];
+    for item in &tokens {
+        let owner = (0..VARIANT_LONGHANDS.len())
+            .find(|&i| {
+                parse_property_value_for(VARIANT_LONGHANDS[i], std::slice::from_ref(item)).is_some()
+            })
+            .ok_or(InvalidValue)?;
+        groups[owner].push(item.clone());
+    }
+    let mut out = Vec::new();
+    for (i, name) in VARIANT_LONGHANDS.iter().enumerate() {
+        let value = if groups[i].is_empty() {
+            initial_value(name)
+        } else {
+            parse_as(name, &groups[i])?
+        };
+        out.push((*name, value));
+    }
+    Ok(out)
+}
+
+/// Whether `name` accepts `chunk`, as its value.
+fn parse_property_value_for(name: &str, chunk: &[ComponentValue]) -> Option<SpecifiedValue> {
+    parse_as(name, chunk).ok()
 }
 
 /// `font: [style] [weight] [stretch] size [/ line-height] family` (CSS Fonts 4
@@ -342,6 +406,27 @@ fn font(values: &[ComponentValue]) -> Result<Expanded, InvalidValue> {
         (
             "font-variant-caps",
             variant.unwrap_or(SpecifiedValue::Value(Initial::Keyword("normal").to_value())),
+        ),
+        (
+            "font-variant-ligatures",
+            initial_value("font-variant-ligatures"),
+        ),
+        (
+            "font-variant-numeric",
+            initial_value("font-variant-numeric"),
+        ),
+        (
+            "font-variant-east-asian",
+            initial_value("font-variant-east-asian"),
+        ),
+        (
+            "font-variant-position",
+            initial_value("font-variant-position"),
+        ),
+        ("font-variant-emoji", initial_value("font-variant-emoji")),
+        (
+            "font-variant-alternates",
+            initial_value("font-variant-alternates"),
         ),
         ("font-size", size),
         ("line-height", line_height),

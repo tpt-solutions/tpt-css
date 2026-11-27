@@ -14,7 +14,7 @@ use crate::selectors::PseudoElement;
 use crate::style::custom::CustomPropertyValue;
 use crate::tree::NodeId;
 use crate::values::calc::{self, CalcNode};
-use crate::values::{Color, LengthUnit, Value};
+use crate::values::{AngleUnit, Color, LengthUnit, Shadow, TimeUnit, TransformFunction, Value};
 
 /// Computed values of one element.
 #[derive(Debug, Clone, PartialEq)]
@@ -201,6 +201,42 @@ pub(crate) fn compute_value(
             };
             Value::Color(c)
         }
+        Value::Time { value, unit } => Value::Time {
+            value: match unit {
+                TimeUnit::S => value,
+                TimeUnit::Ms => value / 1000.0,
+            },
+            unit: TimeUnit::S,
+        },
+        Value::Angle { value, unit } => Value::Angle {
+            value: to_degrees(value, unit),
+            unit: AngleUnit::Deg,
+        },
+        Value::List(items) => Value::List(
+            items
+                .into_iter()
+                .map(|item| compute_value(id, grammar, item, ctx))
+                .collect(),
+        ),
+        Value::Shadows(shadows) => Value::Shadows(
+            shadows
+                .into_iter()
+                .map(|shadow| compute_shadow(id, grammar, shadow, ctx))
+                .collect(),
+        ),
+        Value::Transforms(functions) => Value::Transforms(
+            functions
+                .into_iter()
+                .map(|function| TransformFunction {
+                    name: function.name,
+                    args: function
+                        .args
+                        .into_iter()
+                        .map(|arg| compute_value(id, grammar, arg, ctx))
+                        .collect(),
+                })
+                .collect(),
+        ),
         Value::Keyword(k) if id == ids::FONT_WEIGHT => Value::Number(match k {
             "normal" => 400.0,
             "bold" => 700.0,
@@ -209,6 +245,38 @@ pub(crate) fn compute_value(
             _ => ctx.parent_weight,
         }),
         other => other,
+    }
+}
+
+/// Computes one `box-shadow` layer: its lengths become px, and `currentcolor`
+/// becomes the element's color.
+fn compute_shadow(
+    id: PropertyId,
+    grammar: Grammar,
+    shadow: Shadow,
+    ctx: &ComputeContext,
+) -> Shadow {
+    let mut compute = |v: Value| compute_value(id, grammar, v, ctx);
+    Shadow {
+        inset: shadow.inset,
+        x: compute(shadow.x),
+        y: compute(shadow.y),
+        blur: shadow.blur.map(&mut compute),
+        spread: shadow.spread.map(&mut compute),
+        color: shadow.color.map(|c| match c {
+            Value::Keyword("currentcolor") => Value::Color(ctx.color),
+            other => compute(other),
+        }),
+    }
+}
+
+/// Converts an angle to degrees (CSS Values 4).
+fn to_degrees(value: f64, unit: AngleUnit) -> f64 {
+    match unit {
+        AngleUnit::Deg => value,
+        AngleUnit::Grad => value * 360.0 / 400.0,
+        AngleUnit::Rad => value.to_degrees(),
+        AngleUnit::Turn => value * 360.0,
     }
 }
 

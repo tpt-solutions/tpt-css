@@ -32,6 +32,11 @@ fn grammar_name(grammar: Grammar) -> &'static str {
         Grammar::Image => "image",
         Grammar::Counters { .. } => "counters",
         Grammar::PassThrough => "pass-through (text)",
+        Grammar::TimeList { .. } => "time-list",
+        Grammar::Shadow => "shadow-list",
+        Grammar::Transform => "transform-list",
+        Grammar::KeywordSet { .. } => "keyword-set",
+        Grammar::Alternates => "font-variant-alternates",
     }
 }
 

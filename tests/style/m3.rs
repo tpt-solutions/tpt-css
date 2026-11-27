@@ -1153,9 +1153,15 @@ fn font_variant_caps_longhand_and_font_variant_shorthand() {
         caps("child { font-variant-caps: unicase; font-variant: none }"),
         Value::Keyword("normal")
     );
-    // A sub-value this engine does not have (ligatures) makes the shorthand invalid.
+    // Ligatures are a sub-value of the shorthand now, so it sets them and resets
+    // caps. Alternates (which takes functions) is still not supported, so a value
+    // that names it is invalid.
     assert_eq!(
         caps("child { font-variant-caps: unicase; font-variant: common-ligatures }"),
+        Value::Keyword("normal")
+    );
+    assert_eq!(
+        caps("child { font-variant-caps: unicase; font-variant: stylistic() }"),
         Value::Keyword("unicase")
     );
     // The font shorthand takes small-caps and resets caps otherwise.

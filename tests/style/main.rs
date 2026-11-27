@@ -9,6 +9,7 @@ mod common;
 mod m1;
 mod m2;
 mod m3;
+mod typed;
 
 use common::{style_of, style_with, TestTree};
 use tpt_css::properties::ids;
@@ -249,14 +250,11 @@ fn parse_value(prop: &str, css_value: &str) -> Option<Value> {
 
 #[test]
 fn pass_through_properties_keep_their_canonical_text() {
+    // A grammar this engine does not parse is still accepted as text. `box-shadow`
+    // and `transform` are typed now (see the typed-value tests below).
     assert_eq!(
-        parse_value("box-shadow", "0 0  4px   rgba(0, 0, 0, 0.5)"),
-        Some(Value::Raw("0 0 4px rgba(0, 0, 0, 0.5)".to_string()))
-    );
-    // A grammar this engine does not parse is still accepted as text.
-    assert_eq!(
-        parse_value("transform", "translate(10px, [a] \"b\")"),
-        Some(Value::Raw("translate(10px, [a] \"b\")".to_string()))
+        parse_value("transition", "all 0.2s ease-in"),
+        Some(Value::Raw("all 0.2s ease-in".to_string()))
     );
     assert_eq!(
         parse_value("grid", "none"),
@@ -320,14 +318,14 @@ fn pass_through_initial_values_are_text() {
         Value::Raw("0 1 auto".to_string())
     );
     assert_eq!(
-        spec(lookup("box-shadow").unwrap()).initial.to_value(),
-        Value::Raw("none".to_string())
+        spec(lookup("transition").unwrap()).initial.to_value(),
+        Value::Raw("all 0s ease 0s".to_string())
     );
 }
 
 #[test]
 fn registry_has_37_properties_and_ids_match_their_rows() {
-    assert_eq!(PROPERTIES.len(), 97);
+    assert_eq!(PROPERTIES.len(), 107);
     assert_eq!(PROPERTIES[ids::DISPLAY.index()].name, "display");
     assert_eq!(PROPERTIES[ids::COLOR.index()].name, "color");
     assert_eq!(PROPERTIES[ids::FONT_FAMILY.index()].name, "font-family");

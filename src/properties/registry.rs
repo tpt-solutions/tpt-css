@@ -83,6 +83,32 @@ pub enum Grammar {
         /// Extra keywords accepted in place of an integer.
         keywords: &'static [&'static str],
     },
+    /// A comma-separated list of times, each `s` or `ms`. Durations reject
+    /// negative values; delays accept them.
+    TimeList {
+        /// Reject negative values.
+        non_negative: bool,
+    },
+    /// `box-shadow`: `none`, or a comma-separated list of shadows. Each shadow has
+    /// an optional `inset`, two to four lengths (offsets, blur, spread), and an
+    /// optional color. Percentages and `calc()` are not accepted in the lengths.
+    Shadow,
+    /// `transform`: `none`, or one or more transform functions (CSS Transforms 2).
+    Transform,
+    /// `font-variant-alternates`: `normal`, or a list of `historical-forms` and the
+    /// functions `stylistic()`, `styleset()`, `character-variant()`, `swash()`,
+    /// `ornaments()`, and `annotation()`, each at most once. Stored as canonical
+    /// text, because the features are not resolved here.
+    Alternates,
+    /// A set of keywords from `keywords`, given in canonical order. `normal` and
+    /// `none` must stand alone. At most one keyword from each `exclusive` group
+    /// may appear.
+    KeywordSet {
+        /// The keywords, in canonical order.
+        keywords: &'static [&'static str],
+        /// Groups of keywords of which at most one may appear.
+        exclusive: &'static [&'static [&'static str]],
+    },
 }
 
 /// The initial value (spec 15.1 `initial`). A small enum so the table is
@@ -105,6 +131,8 @@ pub enum Initial {
     SerifFamily,
     /// A pass-through value, as canonical text (see `Grammar::PassThrough`).
     Raw(&'static str),
+    /// A list holding one time, in seconds.
+    Seconds(f64),
 }
 
 impl Initial {
@@ -119,6 +147,10 @@ impl Initial {
             Initial::CurrentColor => Value::Keyword("currentcolor"),
             Initial::SerifFamily => Value::FontFamily(vec!["serif".to_string()]),
             Initial::Raw(text) => Value::Raw(text.to_string()),
+            Initial::Seconds(s) => Value::List(vec![Value::Time {
+                value: s,
+                unit: crate::values::TimeUnit::S,
+            }]),
         }
     }
 }
@@ -144,6 +176,7 @@ const CSS_FONTS: &str = "https://www.w3.org/TR/css-fonts-4/";
 const CSS_DISPLAY: &str = "https://www.w3.org/TR/css-display-3/";
 const CSS_BACKGROUNDS: &str = "https://www.w3.org/TR/css-backgrounds-3/";
 const CSS_TRANSITIONS: &str = "https://www.w3.org/TR/css-transitions-1/";
+const CSS_ANIMATIONS: &str = "https://www.w3.org/TR/css-animations-1/";
 const CSS_FLEXBOX: &str = "https://www.w3.org/TR/css-flexbox-1/";
 const CSS_GRID: &str = "https://www.w3.org/TR/css-grid-2/";
 const CSS_COLOR: &str = "https://www.w3.org/TR/css-color-4/";
@@ -175,6 +208,73 @@ const BOX_SIZING_KEYWORDS: &[&str] = &["content-box", "border-box"];
 const OVERFLOW_KEYWORDS: &[&str] = &["visible", "hidden", "clip", "scroll", "auto"];
 const POSITION_KEYWORDS: &[&str] = &["static", "relative", "absolute", "fixed", "sticky"];
 /// `font-stretch` keywords (CSS Fonts 4 section 2.2). A percentage is also accepted.
+/// `font-variant-ligatures` keywords (CSS Fonts 4 section 6.2). `normal` and
+/// `none` stand alone.
+pub(crate) const LIGATURE_KEYWORDS: &[&str] = &[
+    "normal",
+    "none",
+    "common-ligatures",
+    "no-common-ligatures",
+    "discretionary-ligatures",
+    "no-discretionary-ligatures",
+    "historical-ligatures",
+    "no-historical-ligatures",
+    "contextual",
+    "no-contextual",
+];
+/// At most one keyword from each of these groups.
+pub(crate) const LIGATURE_EXCLUSIVE: &[&[&str]] = &[
+    &["common-ligatures", "no-common-ligatures"],
+    &["discretionary-ligatures", "no-discretionary-ligatures"],
+    &["historical-ligatures", "no-historical-ligatures"],
+    &["contextual", "no-contextual"],
+];
+/// `font-variant-numeric` keywords (CSS Fonts 4 section 6.3).
+pub(crate) const NUMERIC_KEYWORDS: &[&str] = &[
+    "normal",
+    "ordinal",
+    "slashed-zero",
+    "lining-nums",
+    "oldstyle-nums",
+    "proportional-nums",
+    "tabular-nums",
+    "diagonal-fractions",
+    "stacked-fractions",
+];
+pub(crate) const NUMERIC_EXCLUSIVE: &[&[&str]] = &[
+    &["lining-nums", "oldstyle-nums"],
+    &["proportional-nums", "tabular-nums"],
+    &["diagonal-fractions", "stacked-fractions"],
+];
+/// `font-variant-east-asian` keywords (CSS Fonts 4 section 6.4).
+pub(crate) const EAST_ASIAN_KEYWORDS: &[&str] = &[
+    "normal",
+    "jis78",
+    "jis83",
+    "jis90",
+    "jis04",
+    "simplified",
+    "traditional",
+    "full-width",
+    "proportional-width",
+    "ruby",
+];
+pub(crate) const EAST_ASIAN_EXCLUSIVE: &[&[&str]] = &[
+    &[
+        "jis78",
+        "jis83",
+        "jis90",
+        "jis04",
+        "simplified",
+        "traditional",
+    ],
+    &["full-width", "proportional-width"],
+];
+/// `font-variant-position` keywords (CSS Fonts 4 section 6.5).
+pub(crate) const VARIANT_POSITION_KEYWORDS: &[&str] = &["normal", "sub", "super"];
+/// `font-variant-emoji` keywords (CSS Fonts 4 section 6.6).
+pub(crate) const VARIANT_EMOJI_KEYWORDS: &[&str] = &["normal", "text", "emoji", "unicode"];
+
 /// `font-variant-caps` keywords (CSS Fonts 4 section 6.1).
 pub(crate) const FONT_VARIANT_CAPS_KEYWORDS: &[&str] = &[
     "normal",
@@ -978,16 +1078,16 @@ pub const PROPERTIES: &[PropertySpec] = &[
     PropertySpec {
         name: "box-shadow",
         inherited: false,
-        initial: Initial::Raw("none"),
-        grammar: Grammar::PassThrough,
+        initial: Initial::Keyword("none"),
+        grammar: Grammar::Shadow,
         spec_url: CSS_BACKGROUNDS,
     },
     // 89
     PropertySpec {
         name: "transform",
         inherited: false,
-        initial: Initial::Raw("none"),
-        grammar: Grammar::PassThrough,
+        initial: Initial::Keyword("none"),
+        grammar: Grammar::Transform,
         spec_url: CSS_TRANSFORMS,
     },
     // 90
@@ -1045,6 +1145,99 @@ pub const PROPERTIES: &[PropertySpec] = &[
         initial: Initial::Keyword("none"),
         grammar: Grammar::Counters { default: 0 },
         spec_url: CSS_LISTS,
+    },
+    // 97. Times (CSS Transitions 1). Comma-separated lists of non-negative times.
+    PropertySpec {
+        name: "transition-duration",
+        inherited: false,
+        initial: Initial::Seconds(0.0),
+        grammar: Grammar::TimeList { non_negative: true },
+        spec_url: CSS_TRANSITIONS,
+    },
+    // 98
+    PropertySpec {
+        name: "transition-delay",
+        inherited: false,
+        initial: Initial::Seconds(0.0),
+        grammar: Grammar::TimeList {
+            non_negative: false,
+        },
+        spec_url: CSS_TRANSITIONS,
+    },
+    // 99. Times (CSS Animations 1).
+    PropertySpec {
+        name: "animation-duration",
+        inherited: false,
+        initial: Initial::Seconds(0.0),
+        grammar: Grammar::TimeList { non_negative: true },
+        spec_url: CSS_ANIMATIONS,
+    },
+    // 100
+    PropertySpec {
+        name: "animation-delay",
+        inherited: false,
+        initial: Initial::Seconds(0.0),
+        grammar: Grammar::TimeList {
+            non_negative: false,
+        },
+        spec_url: CSS_ANIMATIONS,
+    },
+    // 101-105. Font variant longhands (CSS Fonts 4 section 6). They inherit.
+    PropertySpec {
+        name: "font-variant-ligatures",
+        inherited: true,
+        initial: Initial::Keyword("normal"),
+        grammar: Grammar::KeywordSet {
+            keywords: LIGATURE_KEYWORDS,
+            exclusive: LIGATURE_EXCLUSIVE,
+        },
+        spec_url: CSS_FONTS,
+    },
+    // 102
+    PropertySpec {
+        name: "font-variant-numeric",
+        inherited: true,
+        initial: Initial::Keyword("normal"),
+        grammar: Grammar::KeywordSet {
+            keywords: NUMERIC_KEYWORDS,
+            exclusive: NUMERIC_EXCLUSIVE,
+        },
+        spec_url: CSS_FONTS,
+    },
+    // 103
+    PropertySpec {
+        name: "font-variant-east-asian",
+        inherited: true,
+        initial: Initial::Keyword("normal"),
+        grammar: Grammar::KeywordSet {
+            keywords: EAST_ASIAN_KEYWORDS,
+            exclusive: EAST_ASIAN_EXCLUSIVE,
+        },
+        spec_url: CSS_FONTS,
+    },
+    // 104
+    PropertySpec {
+        name: "font-variant-position",
+        inherited: true,
+        initial: Initial::Keyword("normal"),
+        grammar: Grammar::Keywords(VARIANT_POSITION_KEYWORDS),
+        spec_url: CSS_FONTS,
+    },
+    // 105
+    PropertySpec {
+        name: "font-variant-emoji",
+        inherited: true,
+        initial: Initial::Keyword("normal"),
+        grammar: Grammar::Keywords(VARIANT_EMOJI_KEYWORDS),
+        spec_url: CSS_FONTS,
+    },
+    // 106. `font-variant-alternates` (CSS Fonts 4 section 6.7).
+    PropertySpec {
+        name: "font-variant-alternates",
+        inherited: true,
+        initial: Initial::Keyword("normal"),
+        grammar: Grammar::Alternates,
+        spec_url: CSS_FONTS,
     },
 ];
 

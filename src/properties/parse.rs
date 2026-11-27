@@ -12,7 +12,7 @@ use super::registry::{Grammar, PropertySpec, FONT_STRETCH_KEYWORDS};
 use crate::syntax::{trim_whitespace, ComponentValue, NumericType, TokenKind};
 use crate::values::color::parse_color;
 use crate::values::length::parse_length_percentage;
-use crate::values::{ContentItem, Value};
+use crate::values::{AngleUnit, ContentItem, Shadow, TimeUnit, TransformFunction, Value};
 
 /// CSS-wide keywords (spec 13.8).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,6 +118,14 @@ pub fn parse_property_value(
         Grammar::Integer { keywords } => {
             keyword(values, keywords).or_else(|| integer(values).map(|n| Value::Number(n as f64)))
         }
+        Grammar::TimeList { non_negative } => parse_time_list(values, non_negative),
+        Grammar::Shadow => parse_shadow_list(values),
+        Grammar::Transform => parse_transform_list(values),
+        Grammar::Alternates => parse_alternates(values),
+        Grammar::KeywordSet {
+            keywords,
+            exclusive,
+        } => parse_keyword_set(values, keywords, exclusive),
     };
     value.map(SpecifiedValue::Value).ok_or(InvalidValue)
 }
@@ -562,4 +570,403 @@ fn parse_decoration_line(values: &[ComponentValue]) -> Option<Value> {
     Some(Value::Keyword(
         crate::properties::registry::TEXT_DECORATION_LINE_VALUES[usize::from(bits)],
     ))
+}
+
+/// Splits a comma-separated list, trimming each part. An empty part is kept, so
+/// the caller rejects it.
+fn comma_parts(values: &[ComponentValue]) -> Vec<&[ComponentValue]> {
+    values
+        .split(|v| v.is_token(&TokenKind::Comma))
+        .map(trim_whitespace)
+        .collect()
+}
+
+/// A time, `s` or `ms` (CSS Values 4).
+fn parse_time(values: &[ComponentValue], non_negative: bool) -> Option<Value> {
+    let [ComponentValue::Token(t)] = trim_whitespace(values) else {
+        return None;
+    };
+    let TokenKind::Dimension { value, unit, .. } = &t.kind else {
+        return None;
+    };
+    if non_negative && *value < 0.0 {
+        return None;
+    }
+    let unit = match unit.to_ascii_lowercase().as_str() {
+        "s" => TimeUnit::S,
+        "ms" => TimeUnit::Ms,
+        _ => return None,
+    };
+    Some(Value::Time {
+        value: *value,
+        unit,
+    })
+}
+
+/// A comma-separated list of times. The result is always a list, so one time
+/// and several times have the same shape.
+fn parse_time_list(values: &[ComponentValue], non_negative: bool) -> Option<Value> {
+    comma_parts(values)
+        .into_iter()
+        .map(|part| parse_time(part, non_negative))
+        .collect::<Option<Vec<_>>>()
+        .map(Value::List)
+}
+
+/// An angle, `deg`, `grad`, `rad`, or `turn` (CSS Values 4). A bare zero is not
+/// an angle here.
+fn parse_angle(values: &[ComponentValue]) -> Option<Value> {
+    let [ComponentValue::Token(t)] = trim_whitespace(values) else {
+        return None;
+    };
+    let TokenKind::Dimension { value, unit, .. } = &t.kind else {
+        return None;
+    };
+    let unit = match unit.to_ascii_lowercase().as_str() {
+        "deg" => AngleUnit::Deg,
+        "grad" => AngleUnit::Grad,
+        "rad" => AngleUnit::Rad,
+        "turn" => AngleUnit::Turn,
+        _ => return None,
+    };
+    Some(Value::Angle {
+        value: *value,
+        unit,
+    })
+}
+
+/// `box-shadow`: `none`, or a comma-separated list of shadows.
+fn parse_shadow_list(values: &[ComponentValue]) -> Option<Value> {
+    if let Some(none) = keyword(values, &["none"]) {
+        return Some(none);
+    }
+    comma_parts(values)
+        .into_iter()
+        .map(parse_shadow)
+        .collect::<Option<Vec<_>>>()
+        .map(Value::Shadows)
+}
+
+/// One shadow. Its parts may come in any order, except that the two to four
+/// lengths must be next to each other.
+fn parse_shadow(part: &[ComponentValue]) -> Option<Shadow> {
+    let mut inset = false;
+    let mut color: Option<Value> = None;
+    let mut lengths: Vec<Value> = Vec::new();
+    // Set once a non-length part follows the lengths, which ends their run.
+    let mut lengths_closed = false;
+    for item in part.iter().filter(|v| !v.is_whitespace()) {
+        if let ComponentValue::Token(t) = item {
+            if let TokenKind::Ident(name) = &t.kind {
+                if name.eq_ignore_ascii_case("inset") {
+                    if inset {
+                        return None;
+                    }
+                    inset = true;
+                    if !lengths.is_empty() {
+                        lengths_closed = true;
+                    }
+                    continue;
+                }
+            }
+        }
+        if let Some(length) = parse_length_percentage(std::slice::from_ref(item), false, true)
+            .filter(|v| matches!(v, Value::Length { .. }))
+        {
+            if lengths_closed || lengths.len() == 4 {
+                return None;
+            }
+            lengths.push(length);
+            continue;
+        }
+        if color.is_some() {
+            return None;
+        }
+        if !lengths.is_empty() {
+            lengths_closed = true;
+        }
+        color = Some(match item {
+            ComponentValue::Token(t) if matches!(&t.kind, TokenKind::Ident(s) if s.eq_ignore_ascii_case("currentcolor")) => {
+                Value::Keyword("currentcolor")
+            }
+            _ => Value::Color(parse_color(std::slice::from_ref(item))?),
+        });
+    }
+    if lengths.len() < 2 {
+        return None;
+    }
+    // A blur radius cannot be negative. A spread can.
+    if let Some(Value::Length { value, .. }) = lengths.get(2) {
+        if *value < 0.0 {
+            return None;
+        }
+    }
+    let mut lengths = lengths.into_iter();
+    let x = lengths.next()?;
+    let y = lengths.next()?;
+    Some(Shadow {
+        inset,
+        x,
+        y,
+        blur: lengths.next(),
+        spread: lengths.next(),
+        color,
+    })
+}
+
+/// The kinds of argument a transform function takes.
+#[derive(Debug, Clone, Copy)]
+enum ArgKind {
+    /// A plain number.
+    Number,
+    /// An angle.
+    Angle,
+    /// A length without percentages.
+    Length,
+    /// A length or percentage.
+    LengthPercentage,
+}
+
+const NUMBERS6: &[ArgKind] = &[ArgKind::Number; 6];
+const NUMBERS16: &[ArgKind] = &[ArgKind::Number; 16];
+
+/// The transform functions (CSS Transforms 2): name, argument kinds, and the
+/// fewest arguments that are required. Names keep the grammar's capitals.
+const TRANSFORM_FUNCTIONS: &[(&str, &[ArgKind], usize)] = &[
+    ("matrix", NUMBERS6, 6),
+    ("matrix3d", NUMBERS16, 16),
+    (
+        "translate",
+        &[ArgKind::LengthPercentage, ArgKind::LengthPercentage],
+        1,
+    ),
+    ("translateX", &[ArgKind::LengthPercentage], 1),
+    ("translateY", &[ArgKind::LengthPercentage], 1),
+    ("translateZ", &[ArgKind::Length], 1),
+    (
+        "translate3d",
+        &[
+            ArgKind::LengthPercentage,
+            ArgKind::LengthPercentage,
+            ArgKind::Length,
+        ],
+        3,
+    ),
+    ("scale", &[ArgKind::Number, ArgKind::Number], 1),
+    ("scaleX", &[ArgKind::Number], 1),
+    ("scaleY", &[ArgKind::Number], 1),
+    ("scaleZ", &[ArgKind::Number], 1),
+    (
+        "scale3d",
+        &[ArgKind::Number, ArgKind::Number, ArgKind::Number],
+        3,
+    ),
+    ("rotate", &[ArgKind::Angle], 1),
+    ("rotateX", &[ArgKind::Angle], 1),
+    ("rotateY", &[ArgKind::Angle], 1),
+    ("rotateZ", &[ArgKind::Angle], 1),
+    (
+        "rotate3d",
+        &[
+            ArgKind::Number,
+            ArgKind::Number,
+            ArgKind::Number,
+            ArgKind::Angle,
+        ],
+        4,
+    ),
+    ("skew", &[ArgKind::Angle, ArgKind::Angle], 1),
+    ("skewX", &[ArgKind::Angle], 1),
+    ("skewY", &[ArgKind::Angle], 1),
+    ("perspective", &[ArgKind::Length], 1),
+];
+
+/// `transform`: `none`, or one or more transform functions in order. The
+/// functions are separated by spaces, and each function's arguments by commas.
+fn parse_transform_list(values: &[ComponentValue]) -> Option<Value> {
+    if let Some(none) = keyword(values, &["none"]) {
+        return Some(none);
+    }
+    let mut functions = Vec::new();
+    for item in trim_whitespace(values)
+        .iter()
+        .filter(|v| !v.is_whitespace())
+    {
+        let ComponentValue::Function(f) = item else {
+            return None;
+        };
+        let &(name, kinds, min) = TRANSFORM_FUNCTIONS
+            .iter()
+            .find(|(name, _, _)| f.name.eq_ignore_ascii_case(name))?;
+        let args = transform_args(&f.value, kinds, min)?;
+        functions.push(TransformFunction { name, args });
+    }
+    (!functions.is_empty()).then_some(Value::Transforms(functions))
+}
+
+/// The arguments of one transform function, checked against its kinds. It takes
+/// at least `min` and at most `kinds.len()` arguments.
+fn transform_args(values: &[ComponentValue], kinds: &[ArgKind], min: usize) -> Option<Vec<Value>> {
+    if trim_whitespace(values).is_empty() {
+        return None;
+    }
+    let parts = comma_parts(values);
+    if parts.len() < min || parts.len() > kinds.len() {
+        return None;
+    }
+    parts
+        .into_iter()
+        .zip(kinds)
+        .map(|(part, kind)| transform_arg(part, *kind))
+        .collect()
+}
+
+fn transform_arg(part: &[ComponentValue], kind: ArgKind) -> Option<Value> {
+    match kind {
+        ArgKind::Number => match trim_whitespace(part) {
+            [ComponentValue::Token(t)] => match &t.kind {
+                TokenKind::Number { value, .. } => Some(Value::Number(*value)),
+                _ => None,
+            },
+            _ => None,
+        },
+        ArgKind::Angle => parse_angle(part),
+        ArgKind::Length => {
+            parse_length_percentage(part, false, true).filter(|v| matches!(v, Value::Length { .. }))
+        }
+        ArgKind::LengthPercentage => parse_length_percentage(part, false, true),
+    }
+}
+
+/// A set of keywords for a `KeywordSet` grammar. `normal` and `none` stand alone.
+/// The result is one keyword, or the keywords in the grammar's order.
+fn parse_keyword_set(
+    values: &[ComponentValue],
+    keywords: &'static [&'static str],
+    exclusive: &'static [&'static [&'static str]],
+) -> Option<Value> {
+    let mut words = Vec::new();
+    for item in trim_whitespace(values)
+        .iter()
+        .filter(|v| !v.is_whitespace())
+    {
+        match item {
+            ComponentValue::Token(t) => match &t.kind {
+                TokenKind::Ident(s) => words.push(s.to_ascii_lowercase()),
+                _ => return None,
+            },
+            _ => return None,
+        }
+    }
+    if words.is_empty() {
+        return None;
+    }
+    if words.iter().any(|w| w == "normal" || w == "none") {
+        return keyword(values, keywords);
+    }
+    let mut found: Vec<&'static str> = Vec::new();
+    for word in &words {
+        let k: &'static str = keywords.iter().copied().find(|k| *k == word.as_str())?;
+        if found.contains(&k) {
+            return None;
+        }
+        for group in exclusive {
+            if group.contains(&k) && found.iter().any(|f| group.contains(f)) {
+                return None;
+            }
+        }
+        found.push(k);
+    }
+    found.sort_by_key(|k| keywords.iter().position(|x| x == k));
+    Some(if found.len() == 1 {
+        Value::Keyword(found[0])
+    } else {
+        Value::Keywords(found)
+    })
+}
+
+/// `font-variant-alternates` (CSS Fonts 4 section 6.7). See `Grammar::Alternates`.
+fn parse_alternates(values: &[ComponentValue]) -> Option<Value> {
+    if let Some(normal) = keyword(values, &["normal"]) {
+        return Some(normal);
+    }
+    let mut seen: Vec<String> = Vec::new();
+    let mut parts: Vec<String> = Vec::new();
+    for item in trim_whitespace(values)
+        .iter()
+        .filter(|v| !v.is_whitespace())
+    {
+        match item {
+            ComponentValue::Token(t) => {
+                let TokenKind::Ident(word) = &t.kind else {
+                    return None;
+                };
+                if !word.eq_ignore_ascii_case("historical-forms") {
+                    return None;
+                }
+                let name = "historical-forms".to_string();
+                if seen.contains(&name) {
+                    return None;
+                }
+                seen.push(name.clone());
+                parts.push(name);
+            }
+            ComponentValue::Function(f) => {
+                let name = f.name.to_ascii_lowercase();
+                let args = comma_parts(&f.value);
+                let text_args: Vec<String> = match name.as_str() {
+                    "stylistic" | "swash" | "ornaments" | "annotation" => {
+                        let [arg] = args.as_slice() else {
+                            return None;
+                        };
+                        vec![ident_arg(arg)?]
+                    }
+                    "styleset" => {
+                        if args.is_empty() || args.len() > 20 {
+                            return None;
+                        }
+                        args.iter()
+                            .map(|a| ident_arg(a))
+                            .collect::<Option<Vec<_>>>()?
+                    }
+                    "character-variant" => {
+                        if args.is_empty() || args.len() > 2 {
+                            return None;
+                        }
+                        args.iter()
+                            .map(|a| match trim_whitespace(a) {
+                                [ComponentValue::Token(t)] => match &t.kind {
+                                    TokenKind::Number {
+                                        value,
+                                        ty: NumericType::Integer,
+                                    } if *value >= 0.0 => Some(format!("{}", *value as i64)),
+                                    _ => None,
+                                },
+                                _ => None,
+                            })
+                            .collect::<Option<Vec<_>>>()?
+                    }
+                    _ => return None,
+                };
+                if seen.contains(&name) {
+                    return None;
+                }
+                seen.push(name.clone());
+                parts.push(format!("{name}({})", text_args.join(", ")));
+            }
+            _ => return None,
+        }
+    }
+    (!parts.is_empty()).then(|| Value::Raw(parts.join(" ")))
+}
+
+/// One identifier argument of a function, as written.
+fn ident_arg(part: &[ComponentValue]) -> Option<String> {
+    match trim_whitespace(part) {
+        [ComponentValue::Token(t)] => match &t.kind {
+            TokenKind::Ident(s) => Some(s.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
 }

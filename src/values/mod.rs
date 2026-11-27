@@ -99,6 +99,55 @@ pub enum ContentItem {
     },
 }
 
+/// A time unit (CSS Values 4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeUnit {
+    /// `s`
+    S,
+    /// `ms`
+    Ms,
+}
+
+/// An angle unit (CSS Values 4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AngleUnit {
+    /// `deg`
+    Deg,
+    /// `grad`: 400 per turn.
+    Grad,
+    /// `rad`
+    Rad,
+    /// `turn`: 360 degrees.
+    Turn,
+}
+
+/// One `box-shadow` layer (CSS Backgrounds 3). The parts are kept in a fixed
+/// order, so two equal shadows serialize the same way.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Shadow {
+    /// Whether the shadow is drawn inside the border box.
+    pub inset: bool,
+    /// Horizontal offset, a length.
+    pub x: Value,
+    /// Vertical offset, a length.
+    pub y: Value,
+    /// Blur radius, a non-negative length. `None` when omitted.
+    pub blur: Option<Value>,
+    /// Spread distance, a length. `None` when omitted.
+    pub spread: Option<Value>,
+    /// The color. `None` means `currentcolor`.
+    pub color: Option<Value>,
+}
+
+/// One function of a `transform` list (CSS Transforms 2).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransformFunction {
+    /// The function name as the grammar spells it, for example `translateX`.
+    pub name: &'static str,
+    /// The arguments in order: lengths, percentages, numbers, or angles.
+    pub args: Vec<Value>,
+}
+
 /// A typed property value, used for both specified and computed values.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -148,6 +197,30 @@ pub enum Value {
     /// A `calc()`, `min()`, `max()`, or `clamp()` expression. Specified values
     /// keep their units; computed values have lengths in px.
     Calc(Box<CalcNode>),
+    /// A time. Computed values are in seconds.
+    Time {
+        /// Numeric value.
+        value: f64,
+        /// Unit.
+        unit: TimeUnit,
+    },
+    /// An angle. Computed values are in degrees.
+    Angle {
+        /// Numeric value.
+        value: f64,
+        /// Unit.
+        unit: AngleUnit,
+    },
+    /// A comma-separated list of values of one type, such as
+    /// `transition-duration: 1s, 2s`.
+    List(Vec<Value>),
+    /// A `box-shadow` list of one or more shadows.
+    Shadows(Vec<Shadow>),
+    /// A `transform` list: one or more functions, in order.
+    Transforms(Vec<TransformFunction>),
+    /// Several keywords of one property, in canonical order (for example
+    /// `font-variant-numeric: tabular-nums slashed-zero`).
+    Keywords(Vec<&'static str>),
 }
 
 impl Value {

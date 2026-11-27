@@ -8,7 +8,7 @@
 //! the legacy `rgb()` and `rgba()` forms with 8-bit channels.
 
 use super::calc;
-use super::{color::Color, ContentItem, Value};
+use super::{color::Color, AngleUnit, ContentItem, Shadow, TimeUnit, TransformFunction, Value};
 
 /// Serializes a value in canonical form.
 pub fn serialize_value(value: &Value) -> String {
@@ -81,7 +81,73 @@ pub fn serialize_value(value: &Value) -> String {
             serialize_value(vertical)
         ),
         Value::Calc(node) => calc::serialize(node),
+        Value::Time { value, unit } => format!(
+            "{}{}",
+            format_number(*value),
+            match unit {
+                TimeUnit::S => "s",
+                TimeUnit::Ms => "ms",
+            }
+        ),
+        Value::Angle { value, unit } => format!(
+            "{}{}",
+            format_number(*value),
+            match unit {
+                AngleUnit::Deg => "deg",
+                AngleUnit::Grad => "grad",
+                AngleUnit::Rad => "rad",
+                AngleUnit::Turn => "turn",
+            }
+        ),
+        Value::List(items) => items
+            .iter()
+            .map(serialize_value)
+            .collect::<Vec<_>>()
+            .join(", "),
+        Value::Shadows(shadows) => shadows
+            .iter()
+            .map(serialize_shadow)
+            .collect::<Vec<_>>()
+            .join(", "),
+        Value::Keywords(words) => words.join(" "),
+        Value::Transforms(functions) => functions
+            .iter()
+            .map(serialize_transform)
+            .collect::<Vec<_>>()
+            .join(" "),
     }
+}
+
+/// One `box-shadow` layer: `inset`, the offsets, the blur and spread when they
+/// are present, then the color when it is present.
+fn serialize_shadow(shadow: &Shadow) -> String {
+    let mut parts = Vec::new();
+    if shadow.inset {
+        parts.push("inset".to_string());
+    }
+    parts.push(serialize_value(&shadow.x));
+    parts.push(serialize_value(&shadow.y));
+    if let Some(blur) = &shadow.blur {
+        parts.push(serialize_value(blur));
+    }
+    if let Some(spread) = &shadow.spread {
+        parts.push(serialize_value(spread));
+    }
+    if let Some(color) = &shadow.color {
+        parts.push(serialize_value(color));
+    }
+    parts.join(" ")
+}
+
+/// One `transform` function: its name, then its arguments in parentheses.
+fn serialize_transform(function: &TransformFunction) -> String {
+    let args = function
+        .args
+        .iter()
+        .map(serialize_value)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{}({args})", function.name)
 }
 
 /// Serializes a color as `rgb(r, g, b)` or `rgba(r, g, b, a)`.
