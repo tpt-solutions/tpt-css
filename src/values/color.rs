@@ -1215,6 +1215,10 @@ impl MixSpace {
 enum HueMethod {
     Shorter,
     Longer,
+    /// The hue only moves upward, so the arc may be longer than 180 degrees.
+    Increasing,
+    /// The hue only moves downward.
+    Decreasing,
 }
 
 /// Interpolates two colors in `space` with weights `wa` and `wb` (CSS Color 5).
@@ -1229,14 +1233,18 @@ fn mix_in(space: MixSpace, method: HueMethod, a: Color, b: Color, (wa, wb): (f64
     for i in 0..3 {
         if Some(i) == hue {
             let start = ca[i];
-            let delta = (cb[i] - start).rem_euclid(360.0);
+            // The upward distance from start to end, in [0, 360).
+            let up = (cb[i] - start).rem_euclid(360.0);
             // The shorter arc is within 180 degrees, in either direction.
-            let short = if delta > 180.0 { delta - 360.0 } else { delta };
+            let short = if up > 180.0 { up - 360.0 } else { up };
             let step = match method {
                 HueMethod::Shorter => short,
                 HueMethod::Longer if short > 0.0 => short - 360.0,
                 HueMethod::Longer if short < 0.0 => short + 360.0,
                 HueMethod::Longer => 0.0,
+                HueMethod::Increasing => up,
+                HueMethod::Decreasing if up == 0.0 => 0.0,
+                HueMethod::Decreasing => up - 360.0,
             };
             out[i] = (start + step * wb).rem_euclid(360.0);
         } else if alpha > 0.0 {
@@ -1279,6 +1287,8 @@ fn parse_color_mix(args: &[ComponentValue]) -> Option<Color> {
             let method = match ident_lower(method)?.as_str() {
                 "shorter" => HueMethod::Shorter,
                 "longer" => HueMethod::Longer,
+                "increasing" => HueMethod::Increasing,
+                "decreasing" => HueMethod::Decreasing,
                 _ => return None,
             };
             (*name, method)

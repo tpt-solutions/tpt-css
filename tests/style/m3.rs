@@ -759,6 +759,36 @@ fn hue_interpolation_follows_the_chosen_arc() {
 }
 
 #[test]
+fn increasing_and_decreasing_hues_move_in_one_direction_only() {
+    // Hue 10 to hue 350. Increasing moves up through 180 (cyan). Decreasing
+    // moves down through 0 (red).
+    let up = color_of(
+        "p { color: color-mix(in hsl increasing hue, hsl(10 100% 50%), hsl(350 100% 50%)) }",
+    );
+    assert!(up.components[0] < 0.01 && up.components[1] > 0.99, "{up:?}");
+    let down = color_of(
+        "p { color: color-mix(in hsl decreasing hue, hsl(10 100% 50%), hsl(350 100% 50%)) }",
+    );
+    assert!(
+        down.components[0] > 0.99 && down.components[1] < 0.01,
+        "{down:?}"
+    );
+    // Hue 350 to hue 10. Increasing moves up through 0 (red), like the shorter arc.
+    let up = color_of(
+        "p { color: color-mix(in hsl increasing hue, hsl(350 100% 50%), hsl(10 100% 50%)) }",
+    );
+    assert!(up.components[0] > 0.99 && up.components[1] < 0.01, "{up:?}");
+    // Equal hues stay put under either direction, with no full turn.
+    let same = color_of(
+        "p { color: color-mix(in hsl decreasing hue, hsl(120 100% 50%), hsl(120 100% 50%)) }",
+    );
+    assert!(
+        same.components[1] > 0.99 && same.components[0] < 0.01,
+        "{same:?}"
+    );
+}
+
+#[test]
 fn alpha_is_premultiplied_so_transparent_colors_do_not_tint() {
     // `transparent` is black at alpha 0. Premultiplying keeps the red unchanged.
     let c = color_of("p { color: color-mix(in srgb, transparent 50%, red) }");
