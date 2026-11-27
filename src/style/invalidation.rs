@@ -23,6 +23,7 @@ use crate::ast::selector::{ComplexSelector, SelectorList, SimpleSelector};
 use crate::env::Environment;
 use crate::properties::registry::ids;
 use crate::properties::SpecifiedValue;
+use crate::style::attr;
 use crate::style::computed::StyleMap;
 use crate::style::resolver::{style_tree, CompiledDecl, DeclTarget, Frame, StyleResolver};
 use crate::tree::{NodeId, NodeKind, StyleTree};
@@ -291,21 +292,22 @@ fn rem_base_for<T: StyleTree>(
 const ANY_ATTRIBUTE: &str = "*";
 
 /// Adds the attribute names read by `attr()` in `content` declarations. A
-/// `content` declaration with `var()` adds [`ANY_ATTRIBUTE`].
+/// deferred declaration that reads `attr()` (in `content` or in any other
+/// property) adds [`ANY_ATTRIBUTE`].
 fn collect_content_attrs(decls: &[CompiledDecl], out: &mut BTreeSet<String>) {
     for decl in decls {
-        if !matches!(decl.target, DeclTarget::Prop(id) if id == ids::CONTENT) {
-            continue;
-        }
         match &decl.value {
-            SpecifiedValue::Value(Value::Content(items)) => {
+            SpecifiedValue::Value(Value::Content(items)) if matches!(decl.target, DeclTarget::Prop(id) if id == ids::CONTENT) => {
                 for item in items {
                     if let ContentItem::Attr { name, .. } = item {
                         out.insert(name.clone());
                     }
                 }
             }
-            SpecifiedValue::Unparsed { .. } => {
+            SpecifiedValue::Unparsed { tokens, .. }
+                if matches!(decl.target, DeclTarget::Prop(id) if id == ids::CONTENT)
+                    || attr::contains_attr(tokens) =>
+            {
                 out.insert(ANY_ATTRIBUTE.to_string());
             }
             _ => {}

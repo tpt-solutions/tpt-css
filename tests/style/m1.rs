@@ -409,10 +409,17 @@ fn content_attr_reads_the_element_attribute_at_computed_time() {
 
 #[test]
 fn content_attr_with_an_unsupported_type_is_invalid() {
-    // `string` and a fallback are supported (see `attr_accepts_a_string_type_and_a_fallback`).
+    // `string`, units, and `type()` are supported (see the typed `attr()` tests).
+    // An unknown type is invalid at computed-value time, so `content` stays `normal`.
     let (t, _, child) = chain();
-    let map = style_with("child::before { content: attr(title px) }", &t);
-    assert!(map.get_pseudo(child, &PseudoElement::Before).is_none());
+    let map = style_with("child::before { content: attr(title wobble) }", &t);
+    let content = map
+        .get_pseudo(child, &PseudoElement::Before)
+        .map(|style| style.raw(lookup("content").unwrap()).clone());
+    assert!(
+        content.is_none() || content == Some(tpt_css::values::Value::Keyword("normal")),
+        "{content:?}"
+    );
 }
 
 #[test]

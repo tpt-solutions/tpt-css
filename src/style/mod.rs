@@ -8,6 +8,7 @@
 //! cascade call they depend on. Custom properties and `var()` substitution are
 //! in [`custom`]. Incremental restyle is in [`invalidation`].
 
+pub(crate) mod attr;
 pub mod computed;
 pub(crate) mod counters;
 pub mod custom;

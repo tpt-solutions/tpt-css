@@ -36,6 +36,7 @@ use crate::properties::shorthand::{expand, shorthand_index, SHORTHANDS};
 use crate::properties::{parse_property_value, CssWide, PropertyId, SpecifiedValue};
 use crate::selectors::matching::Matcher;
 use crate::selectors::{PseudoElement, Specificity};
+use crate::style::attr;
 use crate::style::computed::{compute_value, ComputeContext, ComputedStyle, StyleMap};
 use crate::style::counters::{format_counter, CounterScope};
 use crate::style::custom::{
@@ -672,6 +673,12 @@ impl StyleResolver {
                         SpecifiedValue::Unparsed { .. } => true,
                         _ => false,
                     },
+                    // A typed `attr()` in any other property is substituted at
+                    // computed-value time, so the attributes are read there.
+                    DeclTarget::Prop(_) => matches!(
+                        &decl.value,
+                        SpecifiedValue::Unparsed { tokens, .. } if attr::contains_attr(tokens)
+                    ),
                     _ => false,
                 })
             })
@@ -1469,7 +1476,7 @@ fn compute_style(
     let mut values: Vec<Value> = PROPERTIES.iter().map(|p| p.initial.to_value()).collect();
     for idx in compute_order() {
         let id = PropertyId(idx as u16);
-        let specified = specified_value(idx, &cas.props[idx], parent, &customs, limits);
+        let specified = specified_value(idx, &cas.props[idx], parent, &customs, attrs, limits);
         let specified = substitute_content(specified, attrs, counters);
         let computed = compute_value(id, spec(id).grammar, specified, &ctx);
         if id == ids::FONT_SIZE {
@@ -1559,6 +1566,7 @@ fn resolve_winner(
     candidates: &[Winner],
     idx: usize,
     customs: &BTreeMap<String, CustomPropertyValue>,
+    attrs: &Attributes,
     limits: &ParseLimits,
 ) -> Option<SpecifiedValue> {
     let mut pool: Vec<&Winner> = candidates.iter().collect();
@@ -1574,7 +1582,7 @@ fn resolve_winner(
                 pool.retain(|c| c.key.origin == origin && c.key.layer < layer);
             }
             SpecifiedValue::Unparsed { tokens, shorthand } => {
-                return resolve_unparsed(idx, tokens, *shorthand, customs, limits);
+                return resolve_unparsed(idx, tokens, *shorthand, customs, attrs, limits);
             }
             other => return Some(other.clone()),
         }
@@ -1587,10 +1595,11 @@ fn specified_value(
     candidates: &[Winner],
     parent: Option<&ComputedStyle>,
     customs: &BTreeMap<String, CustomPropertyValue>,
+    attrs: &Attributes,
     limits: &ParseLimits,
 ) -> Value {
     let info = &PROPERTIES[idx];
-    let concrete = resolve_winner(candidates, idx, customs, limits)
+    let concrete = resolve_winner(candidates, idx, customs, attrs, limits)
         .unwrap_or(SpecifiedValue::CssWide(CssWide::Unset));
     let initial = || info.initial.to_value();
     let inherit = || match parent {
@@ -1620,10 +1629,18 @@ fn resolve_unparsed(
     tokens: &[ComponentValue],
     shorthand: Option<usize>,
     customs: &BTreeMap<String, CustomPropertyValue>,
+    attrs: &Attributes,
     limits: &ParseLimits,
 ) -> Option<SpecifiedValue> {
     let mut resolver = MapResolver(customs);
     let substituted = substitute(tokens, &mut resolver, 0, limits.max_var_depth).ok()?;
+    let read_attr = |name: &str| attrs.get(name).map(str::to_string);
+    let substituted = attr::substitute(
+        &substituted,
+        &read_attr,
+        idx == ids::CONTENT.index(),
+        limits,
+    )?;
     if crate::values::calc::math_nesting_depth(&substituted) > limits.max_calc_depth {
         return None;
     }
@@ -1680,9 +1697,10 @@ pub(crate) fn compile_declaration(decl: &Declaration) -> Vec<CompiledDecl> {
             .collect();
     }
 
-    let has_var = contains_var(&decl.value);
+    let deferred = contains_var(&decl.value)
+        || attr::needs_substitution(&decl.value, decl.property.eq_ignore_ascii_case("content"));
     if let Some(sid) = shorthand_index(&decl.property) {
-        if has_var {
+        if deferred {
             return SHORTHANDS[sid]
                 .longhands
                 .iter()
@@ -1715,7 +1733,7 @@ pub(crate) fn compile_declaration(decl: &Declaration) -> Vec<CompiledDecl> {
     let Some(id) = lookup(&decl.property) else {
         return Vec::new();
     };
-    if has_var {
+    if deferred {
         return vec![CompiledDecl {
             target: DeclTarget::Prop(id),
             value: SpecifiedValue::Unparsed {

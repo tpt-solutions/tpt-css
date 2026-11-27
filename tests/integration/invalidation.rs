@@ -497,3 +497,25 @@ fn a_root_font_size_change_restyles_the_rules_that_use_relative_lengths() {
     assert_eq!(map.get(divs[0]).unwrap().raw(margin), &Value::px(40.0));
     assert_eq!(map.get(t.root()).unwrap().font_size(), 40.0);
 }
+
+#[test]
+fn a_typed_attr_in_another_property_restyles_when_the_attribute_changes() {
+    let css = "p { width: attr(data-w px, 5px) }";
+    let env = Environment::default();
+    let mut t = TestTree::new(NodeKind::Element);
+    let root = t.root();
+    t.nodes[0].name.local = "html".into();
+    let p = t.element(root, "p");
+    let mut r = resolver_for(css);
+    let _ = r.resolve(&t, &env);
+    t.set_attr(p, "data-w", "40");
+    r.invalidate(&t, StyleChange::AttributeNamed(p, "data-w".to_string()));
+    let map = r.restyle(&t, &env).clone();
+    assert_eq!(
+        *map.get(p)
+            .unwrap()
+            .raw(tpt_css::properties::lookup("width").unwrap()),
+        tpt_css::values::Value::px(40.0)
+    );
+    assert_eq!(map, full(css, &t, &env));
+}
